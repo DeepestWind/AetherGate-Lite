@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-panel: var(--panel);
+  --color-panel-strong: var(--panel-strong);
+  --color-secondary: var(--secondary);
+  --color-foreground: var(--foreground);
+  --color-foreground-soft: var(--foreground-soft);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-strong: var(--accent-strong);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --shadow-panel: var(--shadow-panel);
+  --shadow-card: var(--shadow-card);
+}
+
+:root {
+  --background: #f4f2ee;
+  --surface: rgba(255, 255, 255, 0.92);
+  --elevated: #f8f6f3;
+  --panel: rgba(255, 255, 255, 0.88);
+  --panel-strong: rgba(255, 255, 255, 0.96);
+  --secondary: #f1eeea;
+  --foreground: #202026;
+  --foreground-soft: #3f424a;
+  --muted-foreground: #787b84;
+  --border: rgba(26, 32, 44, 0.1);
+  --border-strong: rgba(26, 32, 44, 0.18);
+  --accent: #df5a4f;
+  --accent-soft: rgba(223, 90, 79, 0.12);
+  --accent-strong: #d6493e;
+  --success: #22a559;
+  --warning: #db9d21;
+  --danger: #d54e4e;
+  --radius: 20px;
+  --shadow-panel: 0 12px 42px -28px rgba(23, 28, 38, 0.2), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+  --shadow-card: 0 10px 28px -24px rgba(28, 30, 39, 0.16), 0 1px 0 rgba(255, 255, 255, 0.75) inset;
+}
+
+:root[data-theme="dark"] {
+  --background: #14161d;
+  --surface: rgba(22, 24, 32, 0.92);
+  --elevated: #1d2028;
+  --panel: rgba(23, 25, 33, 0.88);
+  --panel-strong: rgba(27, 29, 38, 0.96);
+  --secondary: #1b1e26;
+  --foreground: #f5f3ee;
+  --foreground-soft: #e4ddd3;
+  --muted-foreground: #a4a9b4;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --accent: #ef6a5f;
+  --accent-soft: rgba(239, 106, 95, 0.16);
+  --accent-strong: #ff857b;
+  --success: #45c574;
+  --warning: #f2b237;
+  --danger: #f27878;
+  --shadow-panel: 0 24px 64px -34px rgba(0, 0, 0, 0.72), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --shadow-card: 0 20px 50px -36px rgba(0, 0, 0, 0.62), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply min-h-screen bg-background font-sans text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at top left, rgba(223, 90, 79, 0.07), transparent 24%),
+      radial-gradient(circle at right 8%, rgba(34, 165, 89, 0.04), transparent 18%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent 20%);
+  }
+
+  body,
+  #root {
+    min-height: 100vh;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in srgb, var(--muted-foreground) 84%, transparent);
+  }
+
+  ::selection {
+    background: rgba(223, 90, 79, 0.18);
+    color: var(--foreground);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(121, 124, 132, 0.24);
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(121, 124, 132, 0.38);
+  }
+}

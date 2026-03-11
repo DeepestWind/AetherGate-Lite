@@ -1,0 +1,2 @@
+"""AetherGate-Lite application package."""
+
