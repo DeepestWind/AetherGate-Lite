@@ -64,35 +64,36 @@ export function EndpointCard({
         </div>
 
         <div className="grid gap-3 text-sm leading-6 text-muted-foreground">
-          <div className="grid grid-cols-[80px_1fr] gap-3">
+          <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
             <span>接口地址</span>
-            <span className="truncate font-mono text-xs text-foreground">
+            <span className="min-w-0 truncate font-mono text-xs text-foreground">
               {endpoint.baseUrl || '-'}
             </span>
           </div>
-          <div className="grid grid-cols-[80px_1fr] gap-3">
+          <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
             <span>API Key</span>
-            <span className="font-mono text-xs text-foreground">
+            <span
+              className="min-w-0 break-all font-mono text-xs text-foreground"
+              title={endpoint.maskedKey || '未设置'}
+            >
               {endpoint.maskedKey || '未设置'}
             </span>
           </div>
-          <div className="grid grid-cols-[80px_1fr] gap-3">
+          <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
             <span>模型映射</span>
-            <span className="flex flex-wrap items-center gap-2 font-mono text-xs text-foreground">
+            <span className="min-w-0 flex flex-wrap items-center gap-2 font-mono text-xs text-foreground">
               {endpoint.modelName || '-'}
               <ArrowRight className="size-3 text-muted-foreground" />
               {resolveLogicalModel(endpoint)}
             </span>
           </div>
-          <div className="grid grid-cols-[80px_1fr] gap-3">
-            <span>调度参数</span>
-            <span className="font-mono text-xs text-foreground">
-              priority: {endpoint.priority} · weight: {endpoint.weight}
-            </span>
+          <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
+            <span>优先级</span>
+            <span className="min-w-0 font-mono text-xs text-foreground">P{endpoint.priority}</span>
           </div>
-          <div className="grid grid-cols-[80px_1fr] gap-3">
+          <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-3">
             <span>最近验证</span>
-            <span className="font-mono text-xs text-foreground">
+            <span className="min-w-0 font-mono text-xs text-foreground">
               {dayjs(endpoint.lastValidatedAt).isValid()
                 ? dayjs(endpoint.lastValidatedAt).format('YYYY-MM-DD HH:mm:ss')
                 : '暂无'}

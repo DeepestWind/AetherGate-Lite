@@ -14,7 +14,6 @@ describe('endpoint adapters', () => {
         model_name: 'gpt-4o-mini',
         logical_model: 'gpt-4o',
         priority: 2,
-        weight: 100,
         is_enabled: true,
         is_valid: true
       },
@@ -25,7 +24,6 @@ describe('endpoint adapters', () => {
         modelName: 'gpt-4o',
         logicalModel: 'gpt-4o',
         priority: 1,
-        weight: 50,
         isEnabled: true,
         isValid: true
       }
@@ -44,7 +42,6 @@ describe('endpoint adapters', () => {
       modelName: ' gpt-4o ',
       logicalModel: ' ',
       priority: 1,
-      weight: 100,
       inputCostPer1k: 0.1,
       outputCostPer1k: 0.2,
       qualityScore: 7,
@@ -56,6 +53,25 @@ describe('endpoint adapters', () => {
     expect(payload.api_key).toBe('sk-123')
   })
 
+  it('keeps empty costs as null in create payload', () => {
+    const payload = buildCreateEndpointPayload({
+      providerType: 'openai_compatible',
+      name: 'Primary',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-123',
+      modelName: 'gpt-4o',
+      logicalModel: '',
+      priority: 100,
+      inputCostPer1k: null,
+      outputCostPer1k: null,
+      qualityScore: 0,
+      remark: ''
+    })
+
+    expect(payload.input_cost_per_1k).toBeNull()
+    expect(payload.output_cost_per_1k).toBeNull()
+  })
+
   it('builds update payload with optional api key and snake case fields', () => {
     const payload = buildUpdateEndpointPayload({
       providerType: 'openai_compatible',
@@ -65,7 +81,6 @@ describe('endpoint adapters', () => {
       modelName: ' gpt-4o-mini ',
       logicalModel: ' gpt-lite ',
       priority: 1,
-      weight: 90,
       inputCostPer1k: 0.3,
       outputCostPer1k: 0.4,
       qualityScore: 8,
@@ -78,12 +93,31 @@ describe('endpoint adapters', () => {
       model_name: 'gpt-4o-mini',
       logical_model: 'gpt-lite',
       priority: 1,
-      weight: 90,
       input_cost_per_1k: 0.3,
       output_cost_per_1k: 0.4,
       quality_score: 8,
       remark: '',
       api_key: 'sk-updated'
     })
+  })
+
+  it('normalizes nullable costs from api payload', () => {
+    const [endpoint] = normalizeEndpoints([
+      {
+        id: 1,
+        name: 'A',
+        provider_type: 'openai_compatible',
+        model_name: 'gpt-4o',
+        logical_model: 'gpt-4o',
+        priority: 1,
+        input_cost_per_1k: null,
+        output_cost_per_1k: null,
+        is_enabled: true,
+        is_valid: true
+      }
+    ])
+
+    expect(endpoint.inputCostPer1k).toBeNull()
+    expect(endpoint.outputCostPer1k).toBeNull()
   })
 })

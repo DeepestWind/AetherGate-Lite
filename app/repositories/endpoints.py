@@ -21,7 +21,6 @@ class EndpointRepository:
             stmt = stmt.where(ModelEndpoint.logical_model == logical_model)
         stmt = stmt.order_by(
             ModelEndpoint.priority.asc(),
-            ModelEndpoint.weight.desc(),
             ModelEndpoint.id.asc(),
         )
         return db.scalars(stmt).all()
@@ -50,4 +49,3 @@ class EndpointRepository:
     def delete(self, db: Session, endpoint: ModelEndpoint) -> None:
         db.delete(endpoint)
         db.commit()
-

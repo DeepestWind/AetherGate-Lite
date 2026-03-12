@@ -34,6 +34,7 @@ from app.services.routing import RoutingService
 class GatewayResult:
     response: ChatCompletionResponse
     headers: dict[str, str]
+    request_log_id: int | None = None
 
 
 class GatewayService:
@@ -73,7 +74,11 @@ class GatewayService:
                 request.prompt_variables,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+                headers={"X-Request-ID": request_id},
+            ) from exc
 
         prompt_id = prompt_template.prompt_id if prompt_template else request.prompt_id
         cache_key = self._build_cache_key(messages, request, strategy, temperature, prompt_id)
@@ -81,7 +86,7 @@ class GatewayService:
             cached = self.cache.get(cache_key)
             if cached:
                 response = ChatCompletionResponse.model_validate(cached["response"])
-                self._persist_log(
+                request_log = self._persist_log(
                     db,
                     RequestLog(
                         request_id=request_id,
@@ -111,7 +116,11 @@ class GatewayService:
                     "X-AetherGate-Fallbacks": "0",
                     "X-AetherGate-Route-Reason": cached.get("route_reason", "cache"),
                 }
-                return GatewayResult(response=response, headers=headers)
+                return GatewayResult(
+                    response=response,
+                    headers=headers,
+                    request_log_id=request_log.id if request_log else None,
+                )
 
         try:
             candidates, route_reason = self.routing.choose_candidates(
@@ -121,11 +130,16 @@ class GatewayService:
                 request.endpoint_id,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+                headers={"X-Request-ID": request_id},
+            ) from exc
         if not candidates:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No enabled endpoint found for logical model '{request.model}'.",
+                headers={"X-Request-ID": request_id},
             )
 
         errors: list[str] = []
@@ -155,7 +169,7 @@ class GatewayService:
                     result.prompt_tokens,
                     result.completion_tokens,
                 )
-                self._persist_log(
+                request_log = self._persist_log(
                     db,
                     RequestLog(
                         request_id=request_id,
@@ -195,13 +209,17 @@ class GatewayService:
                     "X-AetherGate-Fallbacks": str(index),
                     "X-AetherGate-Route-Reason": route_reason,
                 }
-                return GatewayResult(response=response, headers=headers)
+                return GatewayResult(
+                    response=response,
+                    headers=headers,
+                    request_log_id=request_log.id,
+                )
             except ProviderCallError as exc:
                 self.state_tracker.record_failure(endpoint.id)
                 errors.append(f"{endpoint.name}:{exc.code}")
 
         error_code = errors[-1].split(":", 1)[-1] if errors else "provider_unavailable"
-        self._persist_log(
+        request_log = self._persist_log(
             db,
             RequestLog(
                 request_id=request_id,
@@ -226,14 +244,21 @@ class GatewayService:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"message": "All candidate endpoints failed.", "errors": errors},
+            headers={
+                "X-Request-ID": request_id,
+                "X-AetherGate-Endpoint": str(request_log.endpoint_id or ""),
+                "X-AetherGate-Provider": str(request_log.provider or ""),
+                "X-AetherGate-Fallbacks": str(request_log.fallback_count),
+                "X-AetherGate-Route-Reason": request_log.route_reason or "",
+            },
         )
 
     def list_models(self, db: Session) -> list[str]:
         models = self.endpoint_repository.list_enabled(db)
         return sorted({item.logical_model for item in models})
 
-    def _persist_log(self, db: Session, request_log: RequestLog) -> None:
-        self.request_log_repository.save(db, request_log)
+    def _persist_log(self, db: Session, request_log: RequestLog) -> RequestLog:
+        return self.request_log_repository.save(db, request_log)
 
     def _build_cache_key(
         self,
@@ -285,14 +310,16 @@ class GatewayService:
 
     def _calculate_cost(
         self,
-        input_cost_per_1k: float,
-        output_cost_per_1k: float,
+        input_cost_per_1k: float | None,
+        output_cost_per_1k: float | None,
         prompt_tokens: int,
         completion_tokens: int,
     ) -> float:
+        input_cost = input_cost_per_1k or 0.0
+        output_cost = output_cost_per_1k or 0.0
         return round(
-            (prompt_tokens / 1000 * input_cost_per_1k)
-            + (completion_tokens / 1000 * output_cost_per_1k),
+            (prompt_tokens / 1000 * input_cost)
+            + (completion_tokens / 1000 * output_cost),
             6,
         )
 

@@ -16,9 +16,8 @@ class EndpointBase(BaseModel):
     model_name: str
     logical_model: str
     priority: int = 100
-    weight: int = 1
-    input_cost_per_1k: float = 0.0
-    output_cost_per_1k: float = 0.0
+    input_cost_per_1k: float | None = None
+    output_cost_per_1k: float | None = None
     quality_score: float = 0.0
     is_enabled: bool = True
     remark: str | None = None
@@ -35,7 +34,6 @@ class EndpointUpdate(BaseModel):
     model_name: str | None = None
     logical_model: str | None = None
     priority: int | None = None
-    weight: int | None = None
     input_cost_per_1k: float | None = None
     output_cost_per_1k: float | None = None
     quality_score: float | None = None

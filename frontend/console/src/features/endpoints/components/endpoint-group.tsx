@@ -22,7 +22,6 @@ export function EndpointGroup({
 }: EndpointGroupProps) {
   const primaryPriority = Math.min(...endpoints.map((endpoint) => endpoint.priority))
   const primaryEntries = endpoints.filter((endpoint) => endpoint.priority === primaryPriority)
-  const primaryWeightTotal = primaryEntries.reduce((sum, endpoint) => sum + endpoint.weight, 0)
 
   return (
     <section className="space-y-4">
@@ -35,10 +34,10 @@ export function EndpointGroup({
         <div className="hidden h-px flex-1 bg-border md:block" />
         {primaryEntries.length > 1 ? (
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span>P{primaryPriority} 分流</span>
+            <span>P{primaryPriority} 同级</span>
             {primaryEntries.map((endpoint) => (
               <span key={endpoint.id} className="font-mono">
-                {endpoint.name} {Math.round((endpoint.weight / primaryWeightTotal) * 100)}%
+                {endpoint.name}
               </span>
             ))}
           </div>
