@@ -7,6 +7,12 @@ from app.models.request_log import RequestLog
 
 
 class RequestLogRepository:
+    def get_by_request_id(self, db: Session, request_id: str | None) -> RequestLog | None:
+        if not request_id:
+            return None
+        stmt = select(RequestLog).where(RequestLog.request_id == request_id)
+        return db.scalar(stmt)
+
     def save(self, db: Session, request_log: RequestLog) -> RequestLog:
         db.add(request_log)
         db.commit()
@@ -18,4 +24,3 @@ class RequestLogRepository:
 
     def base_stmt(self):
         return select(RequestLog).order_by(RequestLog.timestamp.desc(), RequestLog.id.desc())
-

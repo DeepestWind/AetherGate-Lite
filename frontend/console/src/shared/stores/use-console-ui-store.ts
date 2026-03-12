@@ -10,6 +10,7 @@ type ConsoleUiState = {
   setMobileNavOpen: (open: boolean) => void
   setThemeMode: (value: ThemeMode) => void
   themeMode: ThemeMode
+  toggleMobileNav: () => void
   toggleNavGroup: (group: NavGroupKey) => void
   toggleSidebar: () => void
 }
@@ -24,6 +25,10 @@ export const useConsoleUiStore = create<ConsoleUiState>((set) => ({
   themeMode: 'light',
   setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
   setThemeMode: (value) => set({ themeMode: value }),
+  toggleMobileNav: () =>
+    set((state) => ({
+      mobileNavOpen: !state.mobileNavOpen
+    })),
   toggleNavGroup: (group) =>
     set((state) => ({
       navGroupsCollapsed: {

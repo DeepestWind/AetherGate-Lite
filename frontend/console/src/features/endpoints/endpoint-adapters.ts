@@ -1,9 +1,9 @@
+import { officialProviderBaseUrls } from '@/features/endpoints/endpoint-constants'
 import type {
   Endpoint,
   EndpointFormValues,
   ProviderType
 } from '@/features/endpoints/endpoint-types'
-import { officialProviderBaseUrls } from '@/features/endpoints/endpoint-constants'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -27,6 +27,15 @@ function readValue(
 function toNumber(value: unknown, fallback = 0) {
   const next = Number(value)
   return Number.isFinite(next) ? next : fallback
+}
+
+function toNullableNumber(value: unknown) {
+  if (value === undefined || value === null || value === '') {
+    return null
+  }
+
+  const next = Number(value)
+  return Number.isFinite(next) ? next : null
 }
 
 function toBoolean(value: unknown, fallback = false) {
@@ -71,10 +80,13 @@ export function normalizeEndpoint(payload: unknown, index: number): Endpoint {
     maskedKey: String(readValue(source, ['maskedKey', 'masked_key'], '未设置')),
     modelName: String(readValue(source, ['modelName', 'model_name'], '')),
     logicalModel: String(readValue(source, ['logicalModel', 'logical_model'], '')),
-    priority: toNumber(readValue(source, ['priority'], 1), 1),
-    weight: toNumber(readValue(source, ['weight'], 100), 100),
-    inputCostPer1k: toNumber(readValue(source, ['inputCostPer1k', 'input_cost_per_1k'], 0)),
-    outputCostPer1k: toNumber(readValue(source, ['outputCostPer1k', 'output_cost_per_1k'], 0)),
+    priority: toNumber(readValue(source, ['priority'], 100), 100),
+    inputCostPer1k: toNullableNumber(
+      readValue(source, ['inputCostPer1k', 'input_cost_per_1k'], null)
+    ),
+    outputCostPer1k: toNullableNumber(
+      readValue(source, ['outputCostPer1k', 'output_cost_per_1k'], null)
+    ),
     qualityScore: toNumber(readValue(source, ['qualityScore', 'quality_score'], 5), 5),
     isEnabled: toBoolean(readValue(source, ['isEnabled', 'is_enabled'], false)),
     isValid: toBoolean(readValue(source, ['isValid', 'is_valid'], false)),
@@ -102,7 +114,7 @@ export function normalizeEndpoints(payload: unknown): Endpoint[] {
         return left.priority - right.priority
       }
 
-      return right.weight - left.weight
+      return left.id - right.id
     })
 }
 
@@ -116,9 +128,8 @@ export function toEndpointFormValues(endpoint?: Endpoint | null): EndpointFormVa
       modelName: '',
       logicalModel: '',
       priority: 100,
-      weight: 1,
-      inputCostPer1k: 0,
-      outputCostPer1k: 0,
+      inputCostPer1k: null,
+      outputCostPer1k: null,
       qualityScore: 0,
       remark: ''
     }
@@ -132,7 +143,6 @@ export function toEndpointFormValues(endpoint?: Endpoint | null): EndpointFormVa
     modelName: endpoint.modelName,
     logicalModel: endpoint.logicalModel,
     priority: endpoint.priority,
-    weight: endpoint.weight,
     inputCostPer1k: endpoint.inputCostPer1k,
     outputCostPer1k: endpoint.outputCostPer1k,
     qualityScore: endpoint.qualityScore,
@@ -152,7 +162,6 @@ export function buildCreateEndpointPayload(values: EndpointFormValues) {
     model_name: values.modelName.trim(),
     logical_model: resolveLogicalModel(values.logicalModel, values.modelName),
     priority: values.priority,
-    weight: values.weight,
     input_cost_per_1k: values.inputCostPer1k,
     output_cost_per_1k: values.outputCostPer1k,
     quality_score: values.qualityScore,
@@ -161,14 +170,13 @@ export function buildCreateEndpointPayload(values: EndpointFormValues) {
 }
 
 export function buildUpdateEndpointPayload(values: EndpointFormValues) {
-  const payload: Record<string, string | number> = {
+  const payload: Record<string, string | number | null> = {
     name: values.name.trim(),
     base_url:
       trimTrailingSlashes(values.baseUrl.trim()) || officialProviderBaseUrls[values.providerType],
     model_name: values.modelName.trim(),
     logical_model: resolveLogicalModel(values.logicalModel, values.modelName),
     priority: values.priority,
-    weight: values.weight,
     input_cost_per_1k: values.inputCostPer1k,
     output_cost_per_1k: values.outputCostPer1k,
     quality_score: values.qualityScore,

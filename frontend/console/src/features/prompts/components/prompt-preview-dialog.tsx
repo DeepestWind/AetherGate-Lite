@@ -20,25 +20,34 @@ type PromptPreviewDialogProps = {
   prompt?: PromptTemplateRecord | null
 }
 
-export function PromptPreviewDialog({
-  onOpenChange,
-  open,
-  prompt
-}: PromptPreviewDialogProps) {
+export function PromptPreviewDialog({ onOpenChange, open, prompt }: PromptPreviewDialogProps) {
   const previewMutation = usePreviewPromptMutation()
   const [variables, setVariables] = useState<Record<string, string>>({})
 
-  const variableKeys = useMemo(() => prompt?.variables ?? [], [prompt])
+  const variableKeys = useMemo(() => prompt?.variables ?? [], [prompt?.id, prompt?.variables])
+  const variableKeysSignature = variableKeys.join('\n')
 
   useEffect(() => {
     if (!open || !prompt) {
-      setVariables({})
+      setVariables((current) => (Object.keys(current).length > 0 ? {} : current))
+      previewMutation.reset()
       return
     }
 
-    setVariables(Object.fromEntries((prompt.variables ?? []).map((key) => [key, ''])))
+    const nextVariables = Object.fromEntries((prompt.variables ?? []).map((key) => [key, '']))
+    setVariables((current) => {
+      const currentKeys = Object.keys(current)
+      if (
+        currentKeys.length === variableKeys.length &&
+        variableKeys.every((key) => current[key] === '')
+      ) {
+        return current
+      }
+
+      return nextVariables
+    })
     previewMutation.reset()
-  }, [open, previewMutation, prompt])
+  }, [open, previewMutation.reset, prompt?.id, variableKeysSignature])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -119,4 +128,3 @@ export function PromptPreviewDialog({
     </Dialog>
   )
 }
-

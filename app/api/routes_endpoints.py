@@ -53,7 +53,6 @@ def create_endpoint(payload: EndpointCreate, db: Session = Depends(get_db)):
         model_name=payload.model_name,
         logical_model=payload.logical_model,
         priority=payload.priority,
-        weight=payload.weight,
         input_cost_per_1k=payload.input_cost_per_1k,
         output_cost_per_1k=payload.output_cost_per_1k,
         quality_score=payload.quality_score,

@@ -35,15 +35,7 @@ class RoutingService:
             return self._prioritize_available(ordered), f"designated:{designated.name}"
 
         if strategy == "cheapest":
-            ordered = sorted(
-                candidates,
-                key=lambda item: (
-                    item.input_cost_per_1k + item.output_cost_per_1k,
-                    item.priority,
-                    -item.quality_score,
-                    item.id,
-                ),
-            )
+            ordered = sorted(candidates, key=self._cheapest_sort_key)
             return self._prioritize_available(ordered), "cheapest"
 
         if strategy == "quality":
@@ -64,10 +56,20 @@ class RoutingService:
     def _sort_by_priority(self, candidates: Sequence[ModelEndpoint]) -> list[ModelEndpoint]:
         return sorted(
             candidates,
-            key=lambda item: (item.priority, -item.weight, -(item.is_valid or False), item.id),
+            key=lambda item: (item.priority, -(item.is_valid or False), item.id),
+        )
+
+    def _cheapest_sort_key(self, item: ModelEndpoint) -> tuple[int, float, int, float, int]:
+        if item.input_cost_per_1k is None or item.output_cost_per_1k is None:
+            return (1, float("inf"), item.priority, -item.quality_score, item.id)
+        return (
+            0,
+            item.input_cost_per_1k + item.output_cost_per_1k,
+            item.priority,
+            -item.quality_score,
+            item.id,
         )
 
     def _prioritize_available(self, ordered: list[ModelEndpoint]) -> list[ModelEndpoint]:
         available = [item for item in ordered if self.state_tracker.is_available(item.id)]
         return available or ordered
-

@@ -1,4 +1,6 @@
 export type ChatStrategy = 'balanced' | 'cheapest' | 'quality'
+export type ChatRole = 'assistant' | 'system' | 'tool' | 'user'
+export type ChatMessageStatus = 'completed' | 'error' | 'pending'
 
 export type ChatConfig = {
   model: string
@@ -8,13 +10,39 @@ export type ChatConfig = {
   variables: Record<string, string>
 }
 
+export const defaultChatConfig: ChatConfig = {
+  strategy: 'balanced',
+  model: '',
+  promptId: '',
+  temperature: 0,
+  variables: {}
+}
+
 export type ChatMessage = {
   callInfo: ChatCallInfo | null
   content: string
+  errorMessage?: string | null
   id: string
   loading?: boolean
-  role: 'assistant' | 'user'
+  role: ChatRole
+  status: ChatMessageStatus
   timestamp: number
+}
+
+export type ChatSession = {
+  createdAt: number
+  draftConfig: ChatConfig
+  loading?: boolean
+  id: string
+  lastCallInfo: ChatCallInfo | null
+  lastMessageAt: number | null
+  lastMessagePreview: string | null
+  lastMessageRole: ChatRole | null
+  messageCount: number
+  messages: ChatMessage[]
+  messagesLoaded: boolean
+  title: string
+  updatedAt: number
 }
 
 export type ChatCallInfo = {
@@ -36,7 +64,7 @@ export type ChatCallInfo = {
 
 export type ChatHistoryMessage = {
   content: string
-  role: 'assistant' | 'user'
+  role: Extract<ChatRole, 'assistant' | 'user'>
 }
 
 export type PromptTemplate = {

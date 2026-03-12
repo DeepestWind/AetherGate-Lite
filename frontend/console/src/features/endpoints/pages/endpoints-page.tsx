@@ -95,7 +95,7 @@ export function EndpointsPage() {
     return Array.from(grouped.entries()).map(([logicalModel, entries]) => ({
       logicalModel,
       endpoints: [...entries].sort(
-        (left, right) => left.priority - right.priority || right.weight - left.weight
+        (left, right) => left.priority - right.priority || left.id - right.id
       )
     }))
   }, [filteredEndpoints])

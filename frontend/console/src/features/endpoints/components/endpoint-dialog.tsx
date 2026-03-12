@@ -40,6 +40,24 @@ function FieldHint({ children }: { children: React.ReactNode }) {
   return <div className="mt-2 text-xs leading-5 text-muted-foreground">{children}</div>
 }
 
+function parseNullableNumber(value: unknown) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value !== 'string') {
+    return value
+  }
+
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+
+  const next = Number(normalized)
+  return Number.isFinite(next) ? next : value
+}
+
 export function EndpointDialog({
   endpoint,
   mode,
@@ -190,7 +208,7 @@ export function EndpointDialog({
             </div>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-4">
+          <div className="grid gap-5 lg:grid-cols-3">
             <div>
               <label htmlFor="endpoint-priority" className="text-sm font-medium">
                 优先级
@@ -206,21 +224,6 @@ export function EndpointDialog({
               <FieldError message={errors.priority?.message} />
             </div>
             <div>
-              <label htmlFor="endpoint-weight" className="text-sm font-medium">
-                权重
-              </label>
-              <Input
-                id="endpoint-weight"
-                className="mt-2"
-                type="number"
-                min={1}
-                max={1000}
-                step={1}
-                {...register('weight', { valueAsNumber: true })}
-              />
-              <FieldError message={errors.weight?.message} />
-            </div>
-            <div>
               <label htmlFor="endpoint-input-cost" className="text-sm font-medium">
                 Input 成本
               </label>
@@ -230,8 +233,10 @@ export function EndpointDialog({
                 type="number"
                 min={0}
                 step="0.000001"
-                {...register('inputCostPer1k', { valueAsNumber: true })}
+                placeholder="留空保存为 null"
+                {...register('inputCostPer1k', { setValueAs: parseNullableNumber })}
               />
+              <FieldHint>留空时保存为 null，不会被当成 0 成本。</FieldHint>
               <FieldError message={errors.inputCostPer1k?.message} />
             </div>
             <div>
@@ -244,8 +249,10 @@ export function EndpointDialog({
                 type="number"
                 min={0}
                 step="0.000001"
-                {...register('outputCostPer1k', { valueAsNumber: true })}
+                placeholder="留空保存为 null"
+                {...register('outputCostPer1k', { setValueAs: parseNullableNumber })}
               />
+              <FieldHint>留空时保存为 null，不会被当成 0 成本。</FieldHint>
               <FieldError message={errors.outputCostPer1k?.message} />
             </div>
           </div>

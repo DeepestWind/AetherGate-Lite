@@ -11,9 +11,8 @@ describe('endpoint form schema', () => {
       modelName: 'gpt-4o',
       logicalModel: '',
       priority: 100,
-      weight: 1,
-      inputCostPer1k: 0,
-      outputCostPer1k: 0,
+      inputCostPer1k: null,
+      outputCostPer1k: null,
       qualityScore: 0,
       remark: ''
     })
@@ -31,9 +30,8 @@ describe('endpoint form schema', () => {
       modelName: 'gpt-4o',
       logicalModel: '',
       priority: 100,
-      weight: 1,
-      inputCostPer1k: 0,
-      outputCostPer1k: 0,
+      inputCostPer1k: null,
+      outputCostPer1k: null,
       qualityScore: 0,
       remark: ''
     })
@@ -51,13 +49,35 @@ describe('endpoint form schema', () => {
       modelName: 'gpt-4o',
       logicalModel: '',
       priority: 100,
-      weight: 1,
-      inputCostPer1k: 0,
-      outputCostPer1k: 0,
+      inputCostPer1k: null,
+      outputCostPer1k: null,
       qualityScore: 0,
       remark: ''
     })
 
     expect(result.success).toBe(true)
+  })
+
+  it('allows empty costs to remain null', () => {
+    const schema = createEndpointFormSchema('create')
+    const result = schema.safeParse({
+      providerType: 'openai_compatible',
+      name: 'OpenAI',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      modelName: 'gpt-4o',
+      logicalModel: '',
+      priority: 100,
+      inputCostPer1k: null,
+      outputCostPer1k: null,
+      qualityScore: 0,
+      remark: ''
+    })
+
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.inputCostPer1k).toBeNull()
+      expect(result.data.outputCostPer1k).toBeNull()
+    }
   })
 })
