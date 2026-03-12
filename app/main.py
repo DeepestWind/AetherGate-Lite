@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
+from app.api.routes_chat_sessions import router as chat_sessions_router
 from app.api.routes_endpoints import router as endpoints_router
 from app.api.routes_gateway import router as gateway_router
 from app.api.routes_internal import router as internal_router
@@ -11,6 +12,7 @@ from app.api.routes_prompts import router as prompts_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.base import Base
+from app.db.schema_compat import ensure_schema_compatibility
 from app.db.session import engine
 
 
@@ -19,6 +21,7 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     configure_logging(settings)
     Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility(engine)
     yield
 
 
@@ -30,6 +33,7 @@ app.include_router(gateway_router)
 app.include_router(internal_router)
 app.include_router(endpoints_router)
 app.include_router(prompts_router)
+app.include_router(chat_sessions_router)
 
 
 def _serve_frontend_path(full_path: str):

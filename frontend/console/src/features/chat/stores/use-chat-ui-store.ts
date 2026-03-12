@@ -1,24 +1,20 @@
 import { create } from 'zustand'
-import type { ChatConfig } from '@/features/chat/chat-types'
+import { defaultChatConfig, type ChatConfig } from '@/features/chat/chat-types'
 
 type ChatUiState = {
   config: ChatConfig
   inputDraft: string
   resetVariables: () => void
+  setConfig: (config: ChatConfig) => void
   setConfigField: <K extends keyof ChatConfig>(key: K, value: ChatConfig[K]) => void
   setInputDraft: (value: string) => void
   setVariables: (variables: Record<string, string>) => void
 }
 
 export const useChatUiStore = create<ChatUiState>((set) => ({
-  config: {
-    strategy: 'balanced',
-    model: '',
-    promptId: '',
-    temperature: 0,
-    variables: {}
-  },
+  config: { ...defaultChatConfig },
   inputDraft: '',
+  setConfig: (config) => set({ config }),
   setInputDraft: (value) => set({ inputDraft: value }),
   setConfigField: (key, value) =>
     set((state) => ({

@@ -1,4 +1,11 @@
-import type { ChatCallInfo, ChatConfig, PromptTemplate } from '@/features/chat/chat-types'
+import {
+  type ChatCallInfo,
+  type ChatConfig,
+  type ChatMessage,
+  type ChatSession,
+  defaultChatConfig,
+  type PromptTemplate
+} from '@/features/chat/chat-types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -136,4 +143,109 @@ export function normalizeChatResponse(
     content,
     callInfo
   }
+}
+
+export function normalizeChatConfig(payload: unknown): ChatConfig {
+  const row = isRecord(payload) ? payload : {}
+
+  return {
+    model: String(readValue(row, ['model'], defaultChatConfig.model)),
+    promptId: String(readValue(row, ['promptId', 'prompt_id'], defaultChatConfig.promptId)),
+    strategy: String(
+      readValue(row, ['strategy'], defaultChatConfig.strategy)
+    ) as ChatConfig['strategy'],
+    temperature: toNumber(readValue(row, ['temperature'], defaultChatConfig.temperature)),
+    variables: isRecord(readValue(row, ['variables'], {}))
+      ? Object.fromEntries(
+          Object.entries(readValue(row, ['variables'], {}) as Record<string, unknown>).map(
+            ([key, value]) => [key, String(value ?? '')]
+          )
+        )
+      : {}
+  }
+}
+
+function normalizeChatCallInfo(payload: unknown): ChatCallInfo | null {
+  if (!isRecord(payload)) {
+    return null
+  }
+
+  return {
+    requestId: String(readValue(payload, ['requestId', 'request_id'], '')),
+    provider: String(readValue(payload, ['provider'], '')),
+    model: String(readValue(payload, ['model'], '')),
+    routeReason: String(readValue(payload, ['routeReason', 'route_reason'], '')),
+    cacheHit: Boolean(readValue(payload, ['cacheHit', 'cache_hit'], false)),
+    endpointId: String(readValue(payload, ['endpointId', 'endpoint_id'], '')),
+    fallbackCount: toNumber(readValue(payload, ['fallbackCount', 'fallback_count'], 0)),
+    latencyMs: toNumber(readValue(payload, ['latencyMs', 'latency_ms'], 0)),
+    promptTokens: toNumber(readValue(payload, ['promptTokens', 'prompt_tokens'], 0)),
+    completionTokens: toNumber(readValue(payload, ['completionTokens', 'completion_tokens'], 0)),
+    totalTokens: toNumber(readValue(payload, ['totalTokens', 'total_tokens'], 0)),
+    costUsd: toNumber(readValue(payload, ['costUsd', 'cost_usd'], 0)),
+    strategy: String(
+      readValue(payload, ['strategy'], defaultChatConfig.strategy)
+    ) as ChatConfig['strategy'],
+    status: String(readValue(payload, ['status'], 'success')) as ChatCallInfo['status']
+  }
+}
+
+export function normalizeChatMessage(payload: unknown): ChatMessage {
+  const row = isRecord(payload) ? payload : {}
+
+  return {
+    id: String(readValue(row, ['id'], crypto.randomUUID())),
+    role: String(readValue(row, ['role'], 'assistant')) as ChatMessage['role'],
+    content: String(readValue(row, ['content'], '')),
+    status: String(readValue(row, ['status'], 'completed')) as ChatMessage['status'],
+    timestamp: toNumber(readValue(row, ['timestamp'], Date.now())),
+    errorMessage: String(readValue(row, ['errorMessage', 'error_message'], '')) || null,
+    callInfo: normalizeChatCallInfo(readValue(row, ['callInfo', 'call_info'], null))
+  }
+}
+
+function getLastCallInfo(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.callInfo) {
+      return messages[index].callInfo
+    }
+  }
+
+  return null
+}
+
+export function normalizeChatSession(payload: unknown): ChatSession {
+  const row = isRecord(payload) ? payload : {}
+  const messages = Array.isArray(readValue(row, ['messages'], []))
+    ? (readValue(row, ['messages'], []) as unknown[]).map(normalizeChatMessage)
+    : []
+
+  return {
+    id: String(readValue(row, ['id'], crypto.randomUUID())),
+    title: String(readValue(row, ['title'], '新对话')),
+    draftConfig: normalizeChatConfig(
+      readValue(row, ['draftConfig', 'draft_config'], defaultChatConfig)
+    ),
+    lastMessageAt:
+      readValue(row, ['lastMessageAt', 'last_message_at'], null) === null
+        ? null
+        : toNumber(readValue(row, ['lastMessageAt', 'last_message_at'], 0)),
+    lastMessagePreview:
+      String(readValue(row, ['lastMessagePreview', 'last_message_preview'], '')) || null,
+    lastMessageRole:
+      (String(
+        readValue(row, ['lastMessageRole', 'last_message_role'], '')
+      ) as ChatSession['lastMessageRole']) || null,
+    messageCount: toNumber(readValue(row, ['messageCount', 'message_count'], messages.length)),
+    createdAt: toNumber(readValue(row, ['createdAt', 'created_at'], Date.now())),
+    updatedAt: toNumber(readValue(row, ['updatedAt', 'updated_at'], Date.now())),
+    messages,
+    messagesLoaded: Array.isArray(readValue(row, ['messages'], null)),
+    lastCallInfo: getLastCallInfo(messages)
+  }
+}
+
+export function normalizeChatSessions(payload: unknown): ChatSession[] {
+  const source = Array.isArray(payload) ? payload : []
+  return source.map(normalizeChatSession)
 }

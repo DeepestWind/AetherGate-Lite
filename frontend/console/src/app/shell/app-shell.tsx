@@ -232,6 +232,7 @@ export function AppShell() {
     setThemeMode,
     sidebarCollapsed,
     themeMode,
+    toggleMobileNav,
     toggleNavGroup,
     toggleSidebar
   } = useConsoleUiStore()
@@ -248,6 +249,7 @@ export function AppShell() {
     }
     return pageMeta['/dashboard']
   }, [location.pathname])
+  const isChatPage = location.pathname.startsWith('/chat')
 
   useEffect(() => {
     const applyTheme = () => {
@@ -277,7 +279,7 @@ export function AppShell() {
 
   const handleNavToggle = () => {
     if (window.innerWidth < 1024) {
-      setMobileNavOpen(!mobileNavOpen)
+      toggleMobileNav()
       return
     }
 
@@ -341,7 +343,14 @@ export function AppShell() {
         </div>
       ) : null}
 
-      <div className="relative flex min-h-[calc(100vh-60px)]">
+      <div
+        className={cn(
+          'relative flex',
+          isChatPage
+            ? 'h-[calc(100vh-61px)] min-h-0 overflow-hidden'
+            : 'min-h-[calc(100vh-61px)] items-start'
+        )}
+      >
         {mobileNavOpen ? (
           <button
             type="button"
@@ -353,12 +362,12 @@ export function AppShell() {
 
         <aside
           className={cn(
-            'fixed inset-y-[60px] left-0 z-30 flex w-[224px] flex-col border-r border-border bg-background/98 px-3 py-4 transition-[width,padding,transform] duration-200 ease-out lg:static lg:inset-y-auto lg:z-0 lg:bg-transparent',
+            'fixed bottom-0 left-0 top-[61px] z-30 flex w-[224px] flex-col border-r border-border bg-background/98 px-3 py-4 transition-[width,padding,transform] duration-200 ease-out lg:sticky lg:top-[61px] lg:z-0 lg:h-[calc(100vh-61px)] lg:bg-transparent',
             mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
             sidebarCollapsed ? 'lg:w-[76px] lg:px-2' : 'lg:w-[224px] lg:px-3'
           )}
         >
-          <nav className="flex-1 overflow-y-auto">
+          <nav className="min-h-0 flex-1 overflow-y-auto">
             {navigationGroups.map((group) => {
               const collapsed = navGroupsCollapsed[group.key]
 
@@ -427,16 +436,23 @@ export function AppShell() {
           </nav>
         </aside>
 
-        <div className="min-w-0 flex-1">
-          <main className="px-4 py-4 sm:px-5 lg:px-6 xl:px-8">
-            <section className="mb-4">
-              <div className="text-[32px] font-semibold tracking-[-0.05em] text-foreground">
-                {currentPage.title}
-              </div>
-              <p className="mt-1 max-w-3xl text-[14px] text-muted-foreground">
-                {currentPage.subtitle}
-              </p>
-            </section>
+        <div className={cn('min-w-0 flex-1', isChatPage && 'min-h-0')}>
+          <main
+            className={cn(
+              'flex flex-col',
+              isChatPage ? 'h-full min-h-0 overflow-hidden' : 'px-4 py-4 sm:px-5 lg:px-6 xl:px-8'
+            )}
+          >
+            {isChatPage ? null : (
+              <section className="mb-4">
+                <div className="text-[32px] font-semibold tracking-[-0.05em] text-foreground">
+                  {currentPage.title}
+                </div>
+                <p className="mt-1 max-w-3xl text-[14px] text-muted-foreground">
+                  {currentPage.subtitle}
+                </p>
+              </section>
+            )}
 
             <Outlet />
           </main>
