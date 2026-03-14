@@ -1,4 +1,5 @@
 import dayjs from 'dayjs'
+import { ChevronDown, Zap } from 'lucide-react'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { cn } from '@/shared/lib/cn'
 
@@ -23,29 +24,31 @@ export function MessageBubble({ callInfo, content, loading, role, timestamp }: M
   const isUser = role === 'user'
 
   return (
-    <div className={cn('flex gap-3', isUser ? 'flex-row-reverse' : 'flex-row')}>
+    <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
-        className={cn(
-          'flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold',
-          isUser
-            ? 'bg-accent text-white'
-            : 'border border-border bg-panel-strong text-muted-foreground'
-        )}
+        className={cn('flex min-w-0 flex-col gap-2', isUser ? 'items-end' : 'w-full items-start')}
       >
-        {isUser ? 'U' : 'A'}
-      </div>
+        <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground-soft">{isUser ? '你' : '助手'}</span>
+          <span>{dayjs(timestamp).format('HH:mm')}</span>
+          {!isUser && callInfo?.cacheHit ? (
+            <span className="inline-flex items-center gap-1 text-success">
+              <Zap className="size-3" />
+              缓存命中
+            </span>
+          ) : null}
+        </div>
 
-      <div className={cn('flex min-w-0 flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
         <div
           className={cn(
-            'relative max-w-[78%] rounded-[22px] px-4 py-3 text-sm leading-7',
+            'relative text-sm leading-7',
             isUser
-              ? 'rounded-tr-md bg-accent text-white'
-              : 'rounded-tl-md border border-border bg-panel-strong text-foreground'
+              ? 'w-fit max-w-[min(78%,680px)] rounded-[22px] rounded-br-md bg-accent-soft px-4 py-3 text-left text-foreground'
+              : 'w-full max-w-[760px] rounded-[18px] px-1 py-0.5 text-foreground'
           )}
         >
           {loading ? (
-            <div className="flex min-h-6 items-center gap-2">
+            <div className="flex min-h-8 items-center gap-2 px-3">
               <span className="size-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.2s]" />
               <span className="size-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.1s]" />
               <span className="size-2 animate-bounce rounded-full bg-muted-foreground" />
@@ -53,24 +56,38 @@ export function MessageBubble({ callInfo, content, loading, role, timestamp }: M
           ) : (
             <div className="whitespace-pre-wrap break-words">{content}</div>
           )}
-
-          {!isUser && callInfo?.cacheHit ? (
-            <div className="absolute -right-2 -top-2 flex size-6 items-center justify-center rounded-full border border-success/40 bg-background text-[11px] text-success">
-              ⚡
-            </div>
-          ) : null}
         </div>
 
-        {!loading ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>{dayjs(timestamp).format('HH:mm')}</span>
-            {!isUser && callInfo?.cacheHit ? <span className="text-success">缓存命中</span> : null}
-            {!isUser ? (
-              <span className="font-mono">
-                {formatLatency({ callInfo, content, loading, role, timestamp })}
+        {!isUser && !loading && callInfo ? (
+          <details className="group w-full max-w-[760px] rounded-2xl border border-border bg-background">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-3">
+                <span>调用详情</span>
+                <span className="font-mono">
+                  {formatLatency({ callInfo, content, loading, role, timestamp })}
+                </span>
+                <span>{callInfo.provider || 'provider'}</span>
+                <span>{callInfo.model || 'model'}</span>
               </span>
-            ) : null}
-          </div>
+              <ChevronDown className="size-4 transition group-open:rotate-180" />
+            </summary>
+
+            <div className="grid gap-3 border-t border-border px-4 py-4 text-xs text-muted-foreground sm:grid-cols-2">
+              {[
+                ['策略', callInfo.strategy],
+                ['路由原因', callInfo.routeReason || '-'],
+                ['Endpoint', callInfo.endpointId || '-'],
+                ['Tokens', `${callInfo.promptTokens}+${callInfo.completionTokens}`],
+                ['总 Tokens', String(callInfo.totalTokens)],
+                ['Fallback', String(callInfo.fallbackCount)]
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl bg-panel px-3 py-2">
+                  <div>{label}</div>
+                  <div className="mt-1 break-all font-mono text-foreground">{value}</div>
+                </div>
+              ))}
+            </div>
+          </details>
         ) : null}
       </div>
     </div>

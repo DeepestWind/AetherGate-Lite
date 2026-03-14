@@ -12,6 +12,7 @@ from app.schemas.chat_sessions import (
     ChatConversationConfig,
     ChatConversationCreate,
     ChatConversationResponse,
+    ChatConversationRename,
     ChatConversationSummaryResponse,
     ChatConversationUpdate,
     ChatMessageResponse,
@@ -124,6 +125,17 @@ def update_conversation(
 ):
     return _to_summary_response(
         chat_session_service.update_conversation(db, conversation_id, payload.draft_config),
+    )
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ChatConversationSummaryResponse)
+def rename_conversation(
+    conversation_id: str,
+    payload: ChatConversationRename,
+    db: Session = Depends(get_db),
+):
+    return _to_summary_response(
+        chat_session_service.rename_conversation(db, conversation_id, payload.title),
     )
 
 

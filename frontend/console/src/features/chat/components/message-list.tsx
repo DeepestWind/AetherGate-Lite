@@ -1,13 +1,15 @@
 import { Sparkles } from 'lucide-react'
 import { useEffect, useRef } from 'react'
+import { chatStarterPrompts } from '@/features/chat/chat-page-utils'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { MessageBubble } from './message-bubble'
 
 type MessageListProps = {
   messages: ChatMessage[]
+  onStarterPromptSelect: (prompt: string) => void
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, onStarterPromptSelect }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const messageCount = messages.length
 
@@ -27,27 +29,32 @@ export function MessageList({ messages }: MessageListProps) {
   return (
     <div ref={listRef} data-chat-message-list className="h-full min-h-0 flex-1 overflow-y-auto">
       {messages.length === 0 ? (
-        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-6 py-10 text-center">
-          <div className="flex size-14 items-center justify-center rounded-full border border-border bg-panel text-accent shadow-card">
+        <div className="mx-auto flex min-h-full w-full max-w-[820px] flex-col items-center justify-center px-6 py-12 text-center">
+          <div className="flex size-12 items-center justify-center rounded-full border border-border bg-panel text-accent">
             <Sparkles className="size-6" />
           </div>
-          <h2 className="mt-5 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-            开始一段新对话
+          <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-foreground">
+            今天想聊点什么？
           </h2>
-          <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
-            在这里直接体验路由策略、Prompt
-            注入、缓存命中和模型切换。左侧可以管理会话，底部输入区会一直保持在可见区域。
+          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+            选择一个会话或直接开始提问。高级参数默认收起，主界面只保留对话本身。
           </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
-            {['多会话切换', '缓存命中', '智能路由', 'Prompt 注入'].map((tag) => (
-              <span key={tag} className="rounded-full border border-border bg-panel px-3 py-1.5">
-                {tag}
-              </span>
+
+          <div className="mt-8 grid w-full gap-3 sm:grid-cols-2">
+            {chatStarterPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                className="rounded-2xl border border-border bg-panel px-4 py-4 text-left text-sm text-foreground transition hover:border-border-strong hover:bg-secondary"
+                onClick={() => onStarterPromptSelect(prompt)}
+              >
+                {prompt}
+              </button>
             ))}
           </div>
         </div>
       ) : (
-        <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[820px] space-y-8 px-4 py-8 sm:px-6">
           {messages.map((message) => (
             <MessageBubble key={message.id} {...message} />
           ))}

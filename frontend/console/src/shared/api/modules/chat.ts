@@ -80,6 +80,13 @@ export async function updateChatConversationConfig(
   return response.data
 }
 
+export async function renameChatConversation(conversationId: string, title: string) {
+  const response = await apiClient.patch<unknown>(`/api/chat/conversations/${conversationId}`, {
+    title
+  })
+  return response.data
+}
+
 export async function deleteChatConversation(conversationId: string) {
   await apiClient.delete(`/api/chat/conversations/${conversationId}`)
 }

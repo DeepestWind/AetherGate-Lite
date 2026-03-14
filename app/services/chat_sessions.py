@@ -96,6 +96,16 @@ class ChatSessionService:
         conversation.draft_config = _normalize_config(config)
         return self.repository.save(db, conversation)
 
+    def rename_conversation(self, db: Session, conversation_id: str, title: str) -> ChatConversation:
+        conversation = self.get_conversation(db, conversation_id)
+        normalized_title = " ".join(title.strip().split())
+        if not normalized_title:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Title is required.")
+
+        conversation.title = normalized_title
+        conversation.title_source = "manual"
+        return self.repository.save(db, conversation)
+
     def delete_conversation(self, db: Session, conversation_id: str) -> None:
         conversation = self.get_conversation(db, conversation_id)
         self.repository.delete(db, conversation)

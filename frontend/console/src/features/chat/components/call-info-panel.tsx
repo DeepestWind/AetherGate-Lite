@@ -4,6 +4,7 @@ import { Badge } from '@/shared/ui/badge'
 
 type CallInfoPanelProps = {
   callInfo: ChatCallInfo | null
+  showTitle?: boolean
 }
 
 function formatLatency(callInfo: ChatCallInfo | null) {
@@ -26,29 +27,31 @@ function tokenSummary(callInfo: ChatCallInfo | null) {
   return `${callInfo.promptTokens}+${callInfo.completionTokens}=${callInfo.totalTokens}`
 }
 
-export function CallInfoPanel({ callInfo }: CallInfoPanelProps) {
+export function CallInfoPanel({ callInfo, showTitle = true }: CallInfoPanelProps) {
   return (
     <div className="space-y-4">
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-        本次调用
-      </div>
+      {showTitle ? (
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          本次调用
+        </div>
+      ) : null}
 
       {!callInfo ? (
-        <div className="rounded-[20px] border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+        <div className="rounded-[20px] border border-dashed border-border bg-background px-4 py-6 text-center text-sm text-muted-foreground">
           发送消息后查看调用详情
         </div>
       ) : (
         <>
-          <div className="space-y-2">
-            <Badge variant={callInfo.cacheHit ? 'accent' : 'outline'}>
+          <div className="flex items-center gap-2">
+            <Badge variant={callInfo.cacheHit ? 'accent' : 'outline'} className="tracking-[0.12em]">
               {callInfo.cacheHit ? 'CACHE HIT' : 'CACHE MISS'}
             </Badge>
-            {callInfo.cacheHit ? (
-              <p className="text-xs text-muted-foreground">本次响应来自缓存。</p>
-            ) : null}
+            <span className="text-xs text-muted-foreground">
+              {callInfo.cacheHit ? '本次响应来自缓存。' : '本次响应来自实时调用。'}
+            </span>
           </div>
 
-          <div className="divide-y divide-border overflow-hidden rounded-[20px] border border-border">
+          <div className="divide-y divide-border overflow-hidden rounded-[20px] border border-border bg-background">
             {[
               ['模型', callInfo.model || '-'],
               ['平台', callInfo.provider || '-'],

@@ -331,3 +331,68 @@ def test_chat_conversation_persists_messages_and_config(client, auth_headers, mo
     final_list_response = client.get("/api/chat/conversations", headers=auth_headers)
     assert final_list_response.status_code == 200
     assert final_list_response.json() == []
+
+
+def test_chat_conversation_can_be_renamed(client, auth_headers):
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": {"model": "", "prompt_id": "", "strategy": "balanced", "temperature": 0, "variables": {}}},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    rename_response = client.patch(
+        f"/api/chat/conversations/{conversation_id}",
+        headers=auth_headers,
+        json={"title": "  手动 标题  "},
+    )
+    assert rename_response.status_code == 200
+    assert rename_response.json()["title"] == "手动 标题"
+
+    detail_response = client.get(f"/api/chat/conversations/{conversation_id}", headers=auth_headers)
+    assert detail_response.status_code == 200
+    assert detail_response.json()["title"] == "手动 标题"
+
+
+def test_chat_conversation_rename_rejects_empty_title(client, auth_headers):
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": {"model": "", "prompt_id": "", "strategy": "balanced", "temperature": 0, "variables": {}}},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    rename_response = client.patch(
+        f"/api/chat/conversations/{conversation_id}",
+        headers=auth_headers,
+        json={"title": "   "},
+    )
+    assert rename_response.status_code == 422
+
+
+def test_chat_conversation_rename_rejects_overlong_title(client, auth_headers):
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": {"model": "", "prompt_id": "", "strategy": "balanced", "temperature": 0, "variables": {}}},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    rename_response = client.patch(
+        f"/api/chat/conversations/{conversation_id}",
+        headers=auth_headers,
+        json={"title": "x" * 201},
+    )
+    assert rename_response.status_code == 422
+
+
+def test_chat_conversation_rename_returns_404_for_missing_conversation(client, auth_headers):
+    rename_response = client.patch(
+        "/api/chat/conversations/conv_missing",
+        headers=auth_headers,
+        json={"title": "新的标题"},
+    )
+    assert rename_response.status_code == 404

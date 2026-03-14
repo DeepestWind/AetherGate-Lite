@@ -13,6 +13,7 @@ import {
   deleteChatConversation,
   getChatConversation,
   listChatConversations,
+  renameChatConversation,
   sendConversationMessage,
   updateChatConversationConfig
 } from '@/shared/api/modules/chat'
@@ -26,20 +27,12 @@ type UseChatSessionResult = {
   initializing: boolean
   lastCallInfo: ChatCallInfo | null
   messages: ChatMessage[]
+  renameSession: (sessionId: string, title: string) => Promise<void>
   saveDraftConfig: (config: ChatConfig) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   sendChat: (content: string, config: ChatConfig) => Promise<void>
   sessions: ChatSession[]
   sending: boolean
-}
-
-function buildSessionTitle(content: string) {
-  const normalized = content.trim().replace(/\s+/g, ' ')
-  if (normalized.length <= 24) {
-    return normalized || '新对话'
-  }
-
-  return `${normalized.slice(0, 24)}…`
 }
 
 function buildErrorCallInfo(strategy: ChatConfig['strategy'], latencyMs: number): ChatCallInfo {
@@ -218,6 +211,43 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     setActiveSessionId(created.id)
   }
 
+  async function renameSession(sessionId: string, title: string) {
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
+      return
+    }
+
+    const previousTitle = sessions.find((session) => session.id === sessionId)?.title ?? ''
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              title: trimmedTitle
+            }
+          : session
+      )
+    )
+
+    try {
+      const payload = await renameChatConversation(sessionId, trimmedTitle)
+      const updated = normalizeChatSession(payload)
+      setSessions((current) => upsertSessions(current, updated))
+    } catch (error) {
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === sessionId
+            ? {
+                ...session,
+                title: previousTitle
+              }
+            : session
+        )
+      )
+      throw error
+    }
+  }
+
   async function clearChat() {
     if (!activeSessionId) {
       return
@@ -284,8 +314,6 @@ export function useChatSession(enabled = true): UseChatSessionResult {
           ? {
               ...session,
               draftConfig: config,
-              title:
-                session.messageCount === 0 ? buildSessionTitle(normalizedContent) : session.title,
               messagesLoaded: true,
               messages: [...session.messages, userMessage, assistantPlaceholder],
               messageCount: session.messageCount + 2,
@@ -350,6 +378,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     initializing,
     lastCallInfo: activeSession?.lastCallInfo ?? null,
     messages: activeSession?.messages ?? [],
+    renameSession,
     saveDraftConfig,
     selectSession,
     sendChat,

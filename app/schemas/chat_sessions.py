@@ -26,6 +26,10 @@ class ChatConversationUpdate(BaseModel):
     draft_config: ChatConversationConfig
 
 
+class ChatConversationRename(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
 class ChatConversationMessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
     draft_config: ChatConversationConfig
