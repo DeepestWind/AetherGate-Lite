@@ -10,6 +10,7 @@ def test_health_endpoint(client):
     response = client.get("/internal/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    assert response.json()["service"] == "branchat"
 
 
 def test_gateway_flow_with_prompt_cache_and_metrics(client, auth_headers, monkeypatch):
@@ -71,17 +72,17 @@ def test_gateway_flow_with_prompt_cache_and_metrics(client, auth_headers, monkey
     }
     first_response = client.post("/v1/chat/completions", headers=auth_headers, json=payload)
     assert first_response.status_code == 200
-    assert first_response.headers["x-aethergate-cache"] == "miss"
+    assert first_response.headers["x-branchat-cache"] == "miss"
     assert first_response.json()["choices"][0]["message"]["content"] == "reply-from-primary-openai"
 
     second_response = client.post("/v1/chat/completions", headers=auth_headers, json=payload)
     assert second_response.status_code == 200
-    assert second_response.headers["x-aethergate-cache"] == "hit"
+    assert second_response.headers["x-branchat-cache"] == "hit"
 
     models_response = client.get("/v1/models", headers=auth_headers)
     assert models_response.status_code == 200
     assert models_response.json()["data"] == [
-        {"id": "gpt-lite", "object": "model", "created": 0, "owned_by": "aethergate-lite"}
+        {"id": "gpt-lite", "object": "model", "created": 0, "owned_by": "branchat"}
     ]
 
     logs_response = client.get("/internal/logs", headers=auth_headers)
@@ -162,7 +163,7 @@ def test_gateway_fallback_uses_next_candidate(client, auth_headers, monkeypatch)
         },
     )
     assert response.status_code == 200
-    assert response.headers["x-aethergate-fallbacks"] == "1"
+    assert response.headers["x-branchat-fallbacks"] == "1"
     assert response.json()["choices"][0]["message"]["content"] == "backup-response"
 
     logs_response = client.get("/internal/logs", headers=auth_headers)

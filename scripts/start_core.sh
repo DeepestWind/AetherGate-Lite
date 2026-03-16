@@ -50,7 +50,7 @@ if [[ "$RELOAD" == "1" ]]; then
   UVICORN_ARGS+=(--reload)
 fi
 
-echo "Starting AetherGate-Lite core on http://${HOST}:${PORT}"
+echo "Starting Branchat core on http://${HOST}:${PORT}"
 if [[ -f frontend/console/dist/index.html ]]; then
   echo "Built console is available at http://${HOST}:${PORT}/"
 else

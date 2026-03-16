@@ -1,2 +1,1 @@
-"""AetherGate-Lite application package."""
-
+"""Branchat application package."""

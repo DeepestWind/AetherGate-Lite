@@ -49,11 +49,11 @@ describe('chat adapters', () => {
       },
       {
         'x-request-id': 'req-1',
-        'x-aethergate-provider': 'openai',
-        'x-aethergate-route-reason': 'balanced',
-        'x-aethergate-cache': 'hit',
-        'x-aethergate-endpoint': '12',
-        'x-aethergate-fallbacks': '1'
+        'x-branchat-provider': 'openai',
+        'x-branchat-route-reason': 'balanced',
+        'x-branchat-cache': 'hit',
+        'x-branchat-endpoint': '12',
+        'x-branchat-fallbacks': '1'
       },
       8,
       'balanced'

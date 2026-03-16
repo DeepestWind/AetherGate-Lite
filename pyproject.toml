@@ -1,5 +1,5 @@
 [project]
-name = "aethergate-lite"
+name = "branchat"
 version = "0.1.0"
 description = "A lightweight self-hosted multi-model gateway for personal use."
 readme = "README.md"
@@ -27,4 +27,3 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

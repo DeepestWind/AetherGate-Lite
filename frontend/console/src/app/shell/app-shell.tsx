@@ -248,7 +248,7 @@ function BrandRail({
           )}
         >
           <div className="truncate text-[15px] font-semibold tracking-[0.01em] text-foreground">
-            AetherGate
+            Branchat
           </div>
         </div>
 
@@ -471,7 +471,7 @@ export function AppShell() {
             <div className="flex min-w-0 items-center gap-3">
               <BrandMark />
               <div className="min-w-0 truncate text-[13px] font-semibold tracking-[0.01em] text-foreground">
-                AetherGate
+                Branchat
               </div>
             </div>
           </div>

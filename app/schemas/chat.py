@@ -60,7 +60,7 @@ class ModelDescriptor(BaseModel):
     id: str
     object: str = "model"
     created: int = 0
-    owned_by: str = "aethergate-lite"
+    owned_by: str = "branchat"
 
 
 class ModelsResponse(BaseModel):

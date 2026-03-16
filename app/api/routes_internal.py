@@ -18,7 +18,7 @@ def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     return HealthResponse(
         status="ok",
-        service="aethergate-lite",
+        service="branchat",
         database="ok",
         timestamp=datetime.now(timezone.utc),
     )
@@ -57,4 +57,3 @@ def logs(
     db: Session = Depends(get_db),
 ):
     return metrics_service.get_logs(db, limit, offset, status, logical_model, prompt_id, cache_hit)
-

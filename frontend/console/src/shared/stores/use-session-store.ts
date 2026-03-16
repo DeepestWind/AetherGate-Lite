@@ -22,7 +22,7 @@ export const useSessionStore = create<SessionState>()(
       clearToken: () => set({ token: '' })
     }),
     {
-      name: 'aethergate-lite-session',
+      name: 'branchat-session',
       onRehydrateStorage: () => (state) => {
         if (defaultToken) {
           state?.setToken(defaultToken)

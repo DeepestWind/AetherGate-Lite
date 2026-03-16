@@ -5,17 +5,25 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+DEFAULT_APP_NAME = "Branchat"
+LEGACY_APP_NAME = "AetherGate-Lite"
+DEFAULT_LOG_DIR = "data/logs"
+DEFAULT_DATABASE_URL = "sqlite:///./data/branchat.db"
+LEGACY_DATABASE_URL = "sqlite:///./data/aethergate-lite.db"
+DEFAULT_LOG_FILE_NAME = "branchat.log"
+LEGACY_LOG_FILE_NAME = "aethergate-lite.log"
 
 
 class Settings(BaseModel):
-    app_name: str = "AetherGate-Lite"
+    app_name: str = DEFAULT_APP_NAME
     env: str = "development"
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
-    log_dir: str = "data/logs"
-    database_url: str = "sqlite:///./data/aethergate-lite.db"
+    log_dir: str = DEFAULT_LOG_DIR
+    database_url: str = DEFAULT_DATABASE_URL
     auth_token: str = "change-me"
     master_key: str = "dev-master-key-change-me"
     cache_ttl_seconds: int = 300
@@ -30,7 +38,7 @@ class Settings(BaseModel):
 
 
 def _read_config_file() -> dict:
-    config_path = Path(os.getenv("AETHERGATE_CONFIG", "config.toml"))
+    config_path = Path(os.getenv("BRANCHAT_CONFIG", "config.toml"))
     if not config_path.exists():
         return {}
     with config_path.open("rb") as file_obj:
@@ -40,24 +48,24 @@ def _read_config_file() -> dict:
 
 def _read_env_overrides() -> dict:
     mapping = {
-        "app_name": "AETHERGATE_APP_NAME",
-        "env": "AETHERGATE_ENV",
-        "host": "AETHERGATE_HOST",
-        "port": "AETHERGATE_PORT",
-        "log_level": "AETHERGATE_LOG_LEVEL",
-        "log_dir": "AETHERGATE_LOG_DIR",
-        "database_url": "AETHERGATE_DATABASE_URL",
-        "auth_token": "AETHERGATE_AUTH_TOKEN",
-        "master_key": "AETHERGATE_MASTER_KEY",
-        "cache_ttl_seconds": "AETHERGATE_CACHE_TTL_SECONDS",
-        "cache_temperature_threshold": "AETHERGATE_CACHE_TEMPERATURE_THRESHOLD",
-        "request_timeout_seconds": "AETHERGATE_REQUEST_TIMEOUT_SECONDS",
-        "timezone": "AETHERGATE_TIMEZONE",
-        "failure_threshold": "AETHERGATE_FAILURE_THRESHOLD",
-        "failure_cooldown_seconds": "AETHERGATE_FAILURE_COOLDOWN_SECONDS",
-        "default_strategy": "AETHERGATE_DEFAULT_STRATEGY",
-        "default_temperature": "AETHERGATE_DEFAULT_TEMPERATURE",
-        "default_max_tokens": "AETHERGATE_DEFAULT_MAX_TOKENS",
+        "app_name": "BRANCHAT_APP_NAME",
+        "env": "BRANCHAT_ENV",
+        "host": "BRANCHAT_HOST",
+        "port": "BRANCHAT_PORT",
+        "log_level": "BRANCHAT_LOG_LEVEL",
+        "log_dir": "BRANCHAT_LOG_DIR",
+        "database_url": "BRANCHAT_DATABASE_URL",
+        "auth_token": "BRANCHAT_AUTH_TOKEN",
+        "master_key": "BRANCHAT_MASTER_KEY",
+        "cache_ttl_seconds": "BRANCHAT_CACHE_TTL_SECONDS",
+        "cache_temperature_threshold": "BRANCHAT_CACHE_TEMPERATURE_THRESHOLD",
+        "request_timeout_seconds": "BRANCHAT_REQUEST_TIMEOUT_SECONDS",
+        "timezone": "BRANCHAT_TIMEZONE",
+        "failure_threshold": "BRANCHAT_FAILURE_THRESHOLD",
+        "failure_cooldown_seconds": "BRANCHAT_FAILURE_COOLDOWN_SECONDS",
+        "default_strategy": "BRANCHAT_DEFAULT_STRATEGY",
+        "default_temperature": "BRANCHAT_DEFAULT_TEMPERATURE",
+        "default_max_tokens": "BRANCHAT_DEFAULT_MAX_TOKENS",
     }
     data: dict[str, str] = {}
     for field_name, env_name in mapping.items():
@@ -67,14 +75,55 @@ def _read_env_overrides() -> dict:
     return data
 
 
+def _sqlite_path_from_url(database_url: str) -> Path | None:
+    prefix = "sqlite:///"
+    if not database_url.startswith(prefix):
+        return None
+
+    db_path = database_url.removeprefix(prefix)
+    if db_path == ":memory:":
+        return None
+    return Path(db_path)
+
+
+def _normalize_legacy_defaults(settings: Settings) -> None:
+    if settings.app_name == LEGACY_APP_NAME:
+        settings.app_name = DEFAULT_APP_NAME
+    if settings.database_url == LEGACY_DATABASE_URL:
+        settings.database_url = DEFAULT_DATABASE_URL
+
+
+def _migrate_file(legacy_path: Path, current_path: Path) -> None:
+    if not legacy_path.exists() or current_path.exists():
+        return
+
+    current_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.rename(current_path)
+
+
+def _prepare_runtime_files(settings: Settings) -> None:
+    if settings.database_url == DEFAULT_DATABASE_URL:
+        legacy_db_path = _sqlite_path_from_url(LEGACY_DATABASE_URL)
+        current_db_path = _sqlite_path_from_url(DEFAULT_DATABASE_URL)
+        if legacy_db_path and current_db_path:
+            _migrate_file(legacy_db_path, current_db_path)
+
+    if settings.log_dir == DEFAULT_LOG_DIR:
+        legacy_log_path = Path(settings.log_dir) / LEGACY_LOG_FILE_NAME
+        current_log_path = Path(settings.log_dir) / DEFAULT_LOG_FILE_NAME
+        _migrate_file(legacy_log_path, current_log_path)
+
+    Path(settings.log_dir).mkdir(parents=True, exist_ok=True)
+    db_path = _sqlite_path_from_url(settings.database_url)
+    if db_path:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     data = _read_config_file()
     data.update(_read_env_overrides())
     settings = Settings.model_validate(data)
-    Path(settings.log_dir).mkdir(parents=True, exist_ok=True)
-    db_path = settings.database_url.replace("sqlite:///", "", 1)
-    if db_path and db_path != ":memory:":
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    _normalize_legacy_defaults(settings)
+    _prepare_runtime_files(settings)
     return settings
-

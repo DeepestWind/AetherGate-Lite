@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-_tmp_dir = Path(tempfile.mkdtemp(prefix="aethergate-lite-tests-"))
+_tmp_dir = Path(tempfile.mkdtemp(prefix="branchat-tests-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ.setdefault("AETHERGATE_DATABASE_URL", f"sqlite:///{_tmp_dir / 'test.db'}")
-os.environ.setdefault("AETHERGATE_AUTH_TOKEN", "test-token")
-os.environ.setdefault("AETHERGATE_MASTER_KEY", "test-master-key")
-os.environ.setdefault("AETHERGATE_LOG_DIR", str(_tmp_dir / "logs"))
+os.environ.setdefault("BRANCHAT_DATABASE_URL", f"sqlite:///{_tmp_dir / 'test.db'}")
+os.environ.setdefault("BRANCHAT_AUTH_TOKEN", "test-token")
+os.environ.setdefault("BRANCHAT_MASTER_KEY", "test-master-key")
+os.environ.setdefault("BRANCHAT_LOG_DIR", str(_tmp_dir / "logs"))
 
 from app.core.config import get_settings
 

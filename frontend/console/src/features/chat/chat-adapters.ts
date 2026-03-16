@@ -125,19 +125,19 @@ export function normalizeChatResponse(
 
   const callInfo: ChatCallInfo = {
     requestId: String(headers['x-request-id'] ?? ''),
-    provider: String(headers['x-aethergate-provider'] ?? ''),
+    provider: String(headers['x-branchat-provider'] ?? ''),
     model: String(readValue(response, ['model'], '')),
-    routeReason: String(headers['x-aethergate-route-reason'] ?? ''),
-    cacheHit: String(headers['x-aethergate-cache'] ?? '').toLowerCase() === 'hit',
-    endpointId: String(headers['x-aethergate-endpoint'] ?? ''),
-    fallbackCount: toNumber(headers['x-aethergate-fallbacks'], 0),
+    routeReason: String(headers['x-branchat-route-reason'] ?? ''),
+    cacheHit: String(headers['x-branchat-cache'] ?? '').toLowerCase() === 'hit',
+    endpointId: String(headers['x-branchat-endpoint'] ?? ''),
+    fallbackCount: toNumber(headers['x-branchat-fallbacks'], 0),
     latencyMs,
     promptTokens: toNumber(readValue(usage, ['promptTokens', 'prompt_tokens'], 0)),
     completionTokens: toNumber(readValue(usage, ['completionTokens', 'completion_tokens'], 0)),
     totalTokens: toNumber(readValue(usage, ['totalTokens', 'total_tokens'], 0)),
     costUsd: 0,
     strategy,
-    status: toNumber(headers['x-aethergate-fallbacks'], 0) > 0 ? 'fallback' : 'success'
+    status: toNumber(headers['x-branchat-fallbacks'], 0) > 0 ? 'fallback' : 'success'
   }
 
   return {

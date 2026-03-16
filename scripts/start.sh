@@ -34,11 +34,11 @@ cleanup() {
 trap 'cleanup 0' EXIT
 trap 'cleanup 130' INT TERM
 
-echo "Starting AetherGate-Lite core on http://${HOST}:${PORT}"
+echo "Starting Branchat core on http://${HOST}:${PORT}"
 HOST="$HOST" PORT="$PORT" RELOAD="$CORE_RELOAD" "$ROOT_DIR/scripts/start_core.sh" &
 CORE_PID="$!"
 
-echo "Starting AetherGate-Lite console on http://127.0.0.1:${DEV_PORT}"
+echo "Starting Branchat console on http://127.0.0.1:${DEV_PORT}"
 DEV_PORT="$DEV_PORT" PROXY_TARGET="$PROXY_TARGET" "$ROOT_DIR/scripts/start_console.sh" &
 CONSOLE_PID="$!"
 

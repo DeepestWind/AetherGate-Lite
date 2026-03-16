@@ -111,11 +111,11 @@ class GatewayService:
                 )
                 headers = {
                     "X-Request-ID": request_id,
-                    "X-AetherGate-Cache": "hit",
-                    "X-AetherGate-Endpoint": str(cached.get("endpoint_id") or ""),
-                    "X-AetherGate-Provider": str(cached.get("provider") or ""),
-                    "X-AetherGate-Fallbacks": "0",
-                    "X-AetherGate-Route-Reason": cached.get("route_reason", "cache"),
+                    "X-Branchat-Cache": "hit",
+                    "X-Branchat-Endpoint": str(cached.get("endpoint_id") or ""),
+                    "X-Branchat-Provider": str(cached.get("provider") or ""),
+                    "X-Branchat-Fallbacks": "0",
+                    "X-Branchat-Route-Reason": cached.get("route_reason", "cache"),
                 }
                 return GatewayResult(
                     response=response,
@@ -204,11 +204,11 @@ class GatewayService:
                     )
                 headers = {
                     "X-Request-ID": request_id,
-                    "X-AetherGate-Cache": "miss",
-                    "X-AetherGate-Endpoint": str(endpoint.id),
-                    "X-AetherGate-Provider": endpoint.provider_type,
-                    "X-AetherGate-Fallbacks": str(index),
-                    "X-AetherGate-Route-Reason": route_reason,
+                    "X-Branchat-Cache": "miss",
+                    "X-Branchat-Endpoint": str(endpoint.id),
+                    "X-Branchat-Provider": endpoint.provider_type,
+                    "X-Branchat-Fallbacks": str(index),
+                    "X-Branchat-Route-Reason": route_reason,
                 }
                 return GatewayResult(
                     response=response,
@@ -247,10 +247,10 @@ class GatewayService:
             detail={"message": "All candidate endpoints failed.", "errors": errors},
             headers={
                 "X-Request-ID": request_id,
-                "X-AetherGate-Endpoint": str(request_log.endpoint_id or ""),
-                "X-AetherGate-Provider": str(request_log.provider or ""),
-                "X-AetherGate-Fallbacks": str(request_log.fallback_count),
-                "X-AetherGate-Route-Reason": request_log.route_reason or "",
+                "X-Branchat-Endpoint": str(request_log.endpoint_id or ""),
+                "X-Branchat-Provider": str(request_log.provider or ""),
+                "X-Branchat-Fallbacks": str(request_log.fallback_count),
+                "X-Branchat-Route-Reason": request_log.route_reason or "",
             },
         )
 

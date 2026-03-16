@@ -1,5 +1,5 @@
 {
-  "name": "aethergate-lite-console",
+  "name": "branchat-console",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "echo \"No e2e suite configured for Lite console\""
+    "test:e2e": "echo \"No e2e suite configured for Branchat console\""
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

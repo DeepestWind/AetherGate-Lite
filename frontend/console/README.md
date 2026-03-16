@@ -1,6 +1,6 @@
-# AetherGate-Lite Console
+# Branchat Console
 
-这是从旧 `AetherGate` 控制台裁剪迁移过来的 React + Vite 前端，当前只保留 Lite 版本仍然支持的能力：
+这是 Branchat 的 React + Vite 控制台，当前聚焦项目的核心管理与调试能力：
 
 - Dashboard 概览
 - Endpoint 管理

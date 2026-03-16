@@ -16,6 +16,5 @@ if [[ ! -d node_modules ]]; then
   npm install
 fi
 
-echo "Building AetherGate-Lite console..."
+echo "Building Branchat console..."
 npm run build
-

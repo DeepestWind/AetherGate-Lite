@@ -40,7 +40,7 @@ def _serve_frontend_path(full_path: str):
     if not frontend_dist.exists():
         return HTMLResponse(
             content=(
-                "<html><body><h1>AetherGate-Lite</h1>"
+                "<html><body><h1>Branchat</h1>"
                 "<p>Frontend is not built yet. Run the console build first.</p>"
                 "</body></html>"
             ),

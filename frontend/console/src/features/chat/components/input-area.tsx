@@ -46,7 +46,7 @@ export function InputArea({ onChange, onSend, sendDisabled, sending, value }: In
           onKeyDown={handleKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder="给 AetherGate 发送消息"
+          placeholder="给 Branchat 发送消息"
           className="min-h-[56px] max-h-[240px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-1 text-[15px] leading-7 focus:border-transparent focus:ring-0"
         />
 

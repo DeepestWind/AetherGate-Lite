@@ -16,7 +16,7 @@ describe('InputArea', () => {
       />
     )
 
-    const textarea = screen.getByPlaceholderText('给 AetherGate 发送消息')
+    const textarea = screen.getByPlaceholderText('给 Branchat 发送消息')
 
     fireEvent.keyDown(textarea, { key: 'Enter' })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
@@ -35,7 +35,7 @@ describe('InputArea', () => {
       />
     )
 
-    const textarea = screen.getByPlaceholderText('给 AetherGate 发送消息')
+    const textarea = screen.getByPlaceholderText('给 Branchat 发送消息')
     expect(screen.queryByText('3/2000')).not.toBeInTheDocument()
 
     fireEvent.focus(textarea)
