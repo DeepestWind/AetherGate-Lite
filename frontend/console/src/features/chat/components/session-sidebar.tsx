@@ -1,4 +1,12 @@
-import { Check, MessageSquarePlus, PencilLine, Search, Trash2, X } from 'lucide-react'
+import {
+  Check,
+  MessageSquarePlus,
+  PanelLeftClose,
+  PencilLine,
+  Search,
+  Trash2,
+  X
+} from 'lucide-react'
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import {
   filterChatSessions,
@@ -14,6 +22,7 @@ import { Input } from '@/shared/ui/input'
 type SessionSidebarProps = {
   activeSessionId: string | null
   onCreate: () => void
+  onCollapse: () => void
   onDelete: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => Promise<void>
   onSelect: (sessionId: string) => void
@@ -24,6 +33,7 @@ type SessionSidebarProps = {
 export function SessionSidebar({
   activeSessionId,
   onCreate,
+  onCollapse,
   onDelete,
   onRename,
   onSelect,
@@ -81,10 +91,23 @@ export function SessionSidebar({
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#fcfcfb]">
       <div className="border-b border-border px-4 py-4">
-        <Button className="w-full justify-start" onClick={onCreate} disabled={sending}>
-          <MessageSquarePlus className="size-4" />
-          新建聊天
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button className="flex-1 justify-start" onClick={onCreate} disabled={sending}>
+            <MessageSquarePlus className="size-4" />
+            新建聊天
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="hidden lg:inline-flex"
+            onClick={onCollapse}
+            aria-label="折叠聊天栏"
+          >
+            <PanelLeftClose className="size-4" />
+          </Button>
+        </div>
 
         <div className="relative mt-3">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

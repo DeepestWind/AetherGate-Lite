@@ -10,6 +10,8 @@ const buttonVariants = cva(
       variant: {
         default:
           'border-accent bg-accent text-white shadow-[0_14px_28px_-18px_rgba(223,90,79,0.72)] hover:border-accent-strong hover:bg-accent-strong',
+        danger:
+          'border-danger bg-danger text-white shadow-[0_14px_28px_-18px_rgba(213,78,78,0.54)] hover:border-danger/90 hover:bg-danger/90',
         secondary:
           'border-border bg-secondary text-foreground hover:border-border-strong hover:bg-elevated',
         ghost:

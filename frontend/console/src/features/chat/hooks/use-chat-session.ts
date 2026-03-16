@@ -8,7 +8,6 @@ import {
   defaultChatConfig
 } from '@/features/chat/chat-types'
 import {
-  clearChatConversation,
   createChatConversation,
   deleteChatConversation,
   getChatConversation,
@@ -21,7 +20,6 @@ import {
 type UseChatSessionResult = {
   activeSession: ChatSession | null
   activeSessionId: string | null
-  clearChat: () => Promise<void>
   createSession: (config: ChatConfig) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   initializing: boolean
@@ -248,16 +246,6 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     }
   }
 
-  async function clearChat() {
-    if (!activeSessionId) {
-      return
-    }
-
-    const payload = await clearChatConversation(activeSessionId)
-    const cleared = normalizeChatSession(payload)
-    setSessions((current) => upsertSessions(current, cleared))
-  }
-
   async function saveDraftConfig(config: ChatConfig) {
     if (!activeSessionId) {
       return
@@ -372,7 +360,6 @@ export function useChatSession(enabled = true): UseChatSessionResult {
   return {
     activeSession,
     activeSessionId,
-    clearChat,
     createSession,
     deleteSession,
     initializing,

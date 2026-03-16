@@ -40,6 +40,7 @@ export function InputArea({ onChange, onSend, sendDisabled, sending, value }: In
       <div className="mx-auto max-w-[820px] rounded-[28px] border border-border bg-panel px-4 py-3 shadow-[0_16px_50px_-40px_rgba(15,23,42,0.25)]">
         <Textarea
           ref={textareaRef}
+          data-chat-composer
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}

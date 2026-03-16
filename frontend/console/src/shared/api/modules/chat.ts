@@ -91,13 +91,6 @@ export async function deleteChatConversation(conversationId: string) {
   await apiClient.delete(`/api/chat/conversations/${conversationId}`)
 }
 
-export async function clearChatConversation(conversationId: string) {
-  const response = await apiClient.delete<unknown>(
-    `/api/chat/conversations/${conversationId}/messages`
-  )
-  return response.data
-}
-
 export async function sendConversationMessage(
   conversationId: string,
   payload: { content: string; draftConfig: ChatConversationConfigPayload }

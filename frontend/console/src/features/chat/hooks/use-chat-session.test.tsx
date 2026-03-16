@@ -2,7 +2,6 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ChatConfig } from '@/features/chat/chat-types'
 import { useChatSession } from '@/features/chat/hooks/use-chat-session'
 import {
-  clearChatConversation,
   createChatConversation,
   deleteChatConversation,
   getChatConversation,
@@ -13,7 +12,6 @@ import {
 } from '@/shared/api/modules/chat'
 
 vi.mock('@/shared/api/modules/chat', () => ({
-  clearChatConversation: vi.fn(),
   createChatConversation: vi.fn(),
   deleteChatConversation: vi.fn(),
   getChatConversation: vi.fn(),
@@ -114,7 +112,6 @@ describe('useChatSession', () => {
       created_at: 1000,
       updated_at: 1000
     })
-    vi.mocked(clearChatConversation).mockResolvedValue({})
     vi.mocked(deleteChatConversation).mockResolvedValue(undefined)
     vi.mocked(renameChatConversation).mockResolvedValue({
       id: 'conv_1',

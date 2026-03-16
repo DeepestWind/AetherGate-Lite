@@ -1,5 +1,7 @@
-import { PanelLeft, Settings2, Trash2 } from 'lucide-react'
+import { PanelLeftOpen, Settings2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import type { ChatMessage } from '@/features/chat/chat-types'
 import { defaultChatConfig } from '@/features/chat/chat-types'
 import { AdvancedSettingsDrawer } from '@/features/chat/components/advanced-settings-drawer'
 import { InputArea } from '@/features/chat/components/input-area'
@@ -14,6 +16,15 @@ import { cn } from '@/shared/lib/cn'
 import { AuthRequiredState } from '@/shared/ui/auth-required-state'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
+import { ConfirmationDialog } from '@/shared/ui/confirmation-dialog'
+
+type PendingConfirmation = {
+  confirmLabel: string
+  description: string
+  onConfirm: () => Promise<void> | void
+  title: string
+  tone?: 'danger' | 'default'
+} | null
 
 export function ChatPage() {
   const { hasHydrated, hasToken } = useApiAccessState()
@@ -25,8 +36,13 @@ export function ChatPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null)
+  const [pinnedMessagesBySession, setPinnedMessagesBySession] = useState<Record<string, string[]>>(
+    {}
+  )
   const saveDraftConfigRef = useRef(session.saveDraftConfig)
   const lastSyncedSessionIdRef = useRef<string | null>(null)
+  const pendingInputDraftRef = useRef<string | null>(null)
 
   useEffect(() => {
     saveDraftConfigRef.current = session.saveDraftConfig
@@ -53,7 +69,8 @@ export function ChatPage() {
       ...session.activeSession.draftConfig,
       variables: { ...session.activeSession.draftConfig.variables }
     })
-    setInputDraft('')
+    setInputDraft(pendingInputDraftRef.current ?? '')
+    pendingInputDraftRef.current = null
   }, [session.activeSession, setConfig, setInputDraft])
 
   const activeDraftConfigKey = JSON.stringify(
@@ -89,6 +106,12 @@ export function ChatPage() {
     () => [...session.sessions].sort((left, right) => right.updatedAt - left.updatedAt),
     [session.sessions]
   )
+  const activeSessionId = session.activeSessionId
+  const pinnedMessageIds = useMemo(
+    () => new Set(activeSessionId ? (pinnedMessagesBySession[activeSessionId] ?? []) : []),
+    [activeSessionId, pinnedMessagesBySession]
+  )
+  const desktopChatSidebarVisible = desktopSidebarOpen
 
   const sendDisabled = !inputDraft.trim() || session.sending || !config.model
 
@@ -107,38 +130,86 @@ export function ChatPage() {
     setMobileSidebarOpen(false)
   }
 
+  const focusComposer = () => {
+    window.requestAnimationFrame(() => {
+      const composer = document.querySelector<HTMLTextAreaElement>('[data-chat-composer]')
+      composer?.focus()
+      composer?.setSelectionRange(composer.value.length, composer.value.length)
+    })
+  }
+
   const handleSelectSession = (sessionId: string) => {
     void session.selectSession(sessionId)
     setMobileSidebarOpen(false)
   }
 
-  const handleClearChat = () => {
-    if (!session.messages.length) {
-      return
-    }
-
-    if (window.confirm('确定清空当前会话吗？该操作不可撤销。')) {
-      void session.clearChat()
-    }
-  }
-
   const handleDeleteSession = (sessionId: string) => {
-    if (window.confirm('确定删除这个会话吗？该操作不可撤销。')) {
-      void session.deleteSession(sessionId)
-    }
+    const targetSession = session.sessions.find((item) => item.id === sessionId)
+
+    setPendingConfirmation({
+      confirmLabel: '删除会话',
+      description: `会话“${targetSession?.title ?? '未命名会话'}”及其中的消息会被永久删除，且无法恢复。`,
+      onConfirm: () => session.deleteSession(sessionId),
+      title: '删除这个会话？',
+      tone: 'danger'
+    })
   }
 
   const handleRenameSession = async (sessionId: string, title: string) => {
     await session.renameSession(sessionId, title)
   }
 
-  const handleSidebarToggle = () => {
+  const handleEditMessage = (message: ChatMessage) => {
+    setInputDraft(message.content)
+    focusComposer()
+  }
+
+  const handleBranchMessage = async (message: ChatMessage) => {
+    pendingInputDraftRef.current = message.content
+
+    try {
+      await session.createSession(config)
+      setMobileSidebarOpen(false)
+      toast.success('已创建新分支，会话内容已放入输入框')
+      focusComposer()
+    } catch {
+      pendingInputDraftRef.current = null
+      toast.error('创建分支失败，请稍后重试')
+    }
+  }
+
+  const handleTogglePinMessage = (message: ChatMessage) => {
+    if (!activeSessionId) {
+      return
+    }
+
+    let nextPinned = false
+
+    setPinnedMessagesBySession((current) => {
+      const currentIds = current[activeSessionId] ?? []
+      const hasPinned = currentIds.includes(message.id)
+      const nextIds = hasPinned
+        ? currentIds.filter((item) => item !== message.id)
+        : [...currentIds, message.id]
+
+      nextPinned = !hasPinned
+
+      return {
+        ...current,
+        [activeSessionId]: nextIds
+      }
+    })
+
+    toast.success(nextPinned ? '已标记消息' : '已取消标记')
+  }
+
+  const handleOpenChatSidebar = () => {
     if (window.innerWidth < 1024) {
       setMobileSidebarOpen((current) => !current)
       return
     }
 
-    setDesktopSidebarOpen((current) => !current)
+    setDesktopSidebarOpen(true)
   }
 
   if (!hasHydrated || session.initializing) {
@@ -166,15 +237,18 @@ export function ChatPage() {
 
       <aside
         className={cn(
-          'fixed bottom-0 left-0 top-[61px] z-30 max-w-[calc(100vw-32px)] border-r border-border bg-[#fcfcfb] transition-[transform,width,border-color] duration-200 ease-out lg:static lg:top-0 lg:z-0 lg:h-full lg:max-w-none',
+          'fixed bottom-0 left-0 top-[61px] z-30 max-w-[calc(100vw-32px)] border-r border-border bg-[#fcfcfb] transition-[transform,width,border-color,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:static lg:top-0 lg:z-0 lg:h-full lg:max-w-none lg:shrink-0 lg:overflow-hidden',
           mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-          desktopSidebarOpen ? 'w-[280px]' : 'lg:w-0 lg:border-r-0'
+          desktopChatSidebarVisible
+            ? 'w-[280px] opacity-100'
+            : 'lg:w-0 lg:border-r-0 lg:opacity-0 lg:pointer-events-none'
         )}
       >
-        <div className="h-full w-[280px] max-w-[calc(100vw-32px)] overflow-hidden">
+        <div className="h-full w-[280px] max-w-[calc(100vw-32px)]">
           <SessionSidebar
             activeSessionId={session.activeSessionId}
             onCreate={() => void handleCreateSession()}
+            onCollapse={() => setDesktopSidebarOpen(false)}
             onDelete={handleDeleteSession}
             onRename={handleRenameSession}
             onSelect={handleSelectSession}
@@ -192,10 +266,11 @@ export function ChatPage() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                onClick={handleSidebarToggle}
-                aria-label={desktopSidebarOpen || mobileSidebarOpen ? '收起会话栏' : '展开会话栏'}
+                className={cn(desktopChatSidebarVisible && 'lg:hidden')}
+                onClick={handleOpenChatSidebar}
+                aria-label="展开聊天栏"
               >
-                <PanelLeft className="size-4" />
+                <PanelLeftOpen className="size-4" />
               </Button>
 
               <div className="min-w-0">
@@ -222,16 +297,6 @@ export function ChatPage() {
               <Settings2 className="size-4" />
               高级设置
             </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleClearChat}
-              disabled={!session.messages.length}
-            >
-              <Trash2 className="size-4" />
-              清空会话
-            </Button>
           </div>
         </header>
 
@@ -249,8 +314,12 @@ export function ChatPage() {
 
         <div className="flex min-h-0 flex-1 flex-col">
           <MessageList
+            pinnedMessageIds={pinnedMessageIds}
             messages={session.messages}
+            onBranchMessage={(message) => void handleBranchMessage(message)}
+            onEditMessage={handleEditMessage}
             onStarterPromptSelect={(prompt) => setInputDraft(prompt)}
+            onTogglePinMessage={handleTogglePinMessage}
           />
 
           <InputArea
@@ -272,6 +341,20 @@ export function ChatPage() {
         onVariablesChange={setVariables}
         open={settingsOpen}
         promptTemplates={promptsQuery.data ?? []}
+      />
+
+      <ConfirmationDialog
+        open={pendingConfirmation !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingConfirmation(null)
+          }
+        }}
+        title={pendingConfirmation?.title ?? ''}
+        description={pendingConfirmation?.description ?? ''}
+        confirmLabel={pendingConfirmation?.confirmLabel ?? '确认'}
+        tone={pendingConfirmation?.tone ?? 'default'}
+        onConfirm={pendingConfirmation?.onConfirm ?? (() => {})}
       />
     </div>
   )

@@ -5,11 +5,22 @@ import type { ChatMessage } from '@/features/chat/chat-types'
 import { MessageBubble } from './message-bubble'
 
 type MessageListProps = {
+  pinnedMessageIds: Set<string>
   messages: ChatMessage[]
+  onBranchMessage: (message: ChatMessage) => void | Promise<void>
+  onEditMessage: (message: ChatMessage) => void
   onStarterPromptSelect: (prompt: string) => void
+  onTogglePinMessage: (message: ChatMessage) => void
 }
 
-export function MessageList({ messages, onStarterPromptSelect }: MessageListProps) {
+export function MessageList({
+  pinnedMessageIds,
+  messages,
+  onBranchMessage,
+  onEditMessage,
+  onStarterPromptSelect,
+  onTogglePinMessage
+}: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const messageCount = messages.length
 
@@ -56,7 +67,14 @@ export function MessageList({ messages, onStarterPromptSelect }: MessageListProp
       ) : (
         <div className="mx-auto w-full max-w-[820px] space-y-8 px-4 py-8 sm:px-6">
           {messages.map((message) => (
-            <MessageBubble key={message.id} {...message} />
+            <MessageBubble
+              key={message.id}
+              isPinned={pinnedMessageIds.has(message.id)}
+              message={message}
+              onBranchMessage={onBranchMessage}
+              onEditMessage={onEditMessage}
+              onTogglePinMessage={onTogglePinMessage}
+            />
           ))}
         </div>
       )}

@@ -6,13 +6,14 @@ import { PromptPreviewDialog } from '@/features/prompts/components/prompt-previe
 import { useCreatePromptMutation } from '@/features/prompts/mutations/use-create-prompt-mutation'
 import { useDeletePromptMutation } from '@/features/prompts/mutations/use-delete-prompt-mutation'
 import { useUpdatePromptMutation } from '@/features/prompts/mutations/use-update-prompt-mutation'
-import { usePromptsQuery } from '@/features/prompts/queries/use-prompts-query'
 import type { PromptFormValues, PromptTemplateRecord } from '@/features/prompts/prompt-types'
+import { usePromptsQuery } from '@/features/prompts/queries/use-prompts-query'
 import { useApiAccessState } from '@/shared/auth/use-api-access'
-import { Badge } from '@/shared/ui/badge'
 import { AuthRequiredState } from '@/shared/ui/auth-required-state'
+import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
+import { ConfirmationDialog } from '@/shared/ui/confirmation-dialog'
 import { Input } from '@/shared/ui/input'
 
 export function PromptsPage() {
@@ -25,6 +26,7 @@ export function PromptsPage() {
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingPrompt, setEditingPrompt] = useState<PromptTemplateRecord | null>(null)
+  const [pendingDeletePrompt, setPendingDeletePrompt] = useState<PromptTemplateRecord | null>(null)
   const [previewPrompt, setPreviewPrompt] = useState<PromptTemplateRecord | null>(null)
 
   const prompts = query.data ?? []
@@ -223,14 +225,7 @@ export function PromptsPage() {
                     <Pencil className="size-4" />
                     编辑
                   </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      if (window.confirm(`确定删除模板 ${prompt.promptId} 吗？`)) {
-                        deleteMutation.mutate(prompt.id)
-                      }
-                    }}
-                  >
+                  <Button variant="ghost" onClick={() => setPendingDeletePrompt(prompt)}>
                     <Trash2 className="size-4" />
                     删除
                   </Button>
@@ -263,6 +258,30 @@ export function PromptsPage() {
             setPreviewPrompt(null)
           }
         }}
+      />
+
+      <ConfirmationDialog
+        open={pendingDeletePrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDeletePrompt(null)
+          }
+        }}
+        title="删除这个 Prompt 模板？"
+        description={
+          pendingDeletePrompt
+            ? `模板“${pendingDeletePrompt.promptId}”会被永久删除，且无法恢复。`
+            : ''
+        }
+        confirmLabel="删除模板"
+        tone="danger"
+        onConfirm={() =>
+          pendingDeletePrompt
+            ? deleteMutation.mutateAsync(pendingDeletePrompt.id).then(() => {
+                setPendingDeletePrompt(null)
+              })
+            : undefined
+        }
       />
     </div>
   )
