@@ -1,9 +1,10 @@
-import { PanelLeftOpen, Settings2 } from 'lucide-react'
+import { GitBranch, PanelLeftOpen, Settings2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { defaultChatConfig } from '@/features/chat/chat-types'
 import { AdvancedSettingsDrawer } from '@/features/chat/components/advanced-settings-drawer'
+import { ConversationTreePanel } from '@/features/chat/components/conversation-tree-panel'
 import { InputArea } from '@/features/chat/components/input-area'
 import { MessageList } from '@/features/chat/components/message-list'
 import { SessionSidebar } from '@/features/chat/components/session-sidebar'
@@ -17,6 +18,7 @@ import { AuthRequiredState } from '@/shared/ui/auth-required-state'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ConfirmationDialog } from '@/shared/ui/confirmation-dialog'
+import { Select } from '@/shared/ui/select'
 
 type PendingConfirmation = {
   confirmLabel: string
@@ -37,12 +39,8 @@ export function ChatPage() {
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null)
-  const [pinnedMessagesBySession, setPinnedMessagesBySession] = useState<Record<string, string[]>>(
-    {}
-  )
   const saveDraftConfigRef = useRef(session.saveDraftConfig)
   const lastSyncedSessionIdRef = useRef<string | null>(null)
-  const pendingInputDraftRef = useRef<string | null>(null)
 
   useEffect(() => {
     saveDraftConfigRef.current = session.saveDraftConfig
@@ -69,8 +67,7 @@ export function ChatPage() {
       ...session.activeSession.draftConfig,
       variables: { ...session.activeSession.draftConfig.variables }
     })
-    setInputDraft(pendingInputDraftRef.current ?? '')
-    pendingInputDraftRef.current = null
+    setInputDraft('')
   }, [session.activeSession, setConfig, setInputDraft])
 
   const activeDraftConfigKey = JSON.stringify(
@@ -106,12 +103,10 @@ export function ChatPage() {
     () => [...session.sessions].sort((left, right) => right.updatedAt - left.updatedAt),
     [session.sessions]
   )
-  const activeSessionId = session.activeSessionId
-  const pinnedMessageIds = useMemo(
-    () => new Set(activeSessionId ? (pinnedMessagesBySession[activeSessionId] ?? []) : []),
-    [activeSessionId, pinnedMessagesBySession]
-  )
   const desktopChatSidebarVisible = desktopSidebarOpen
+  const activeBranchName = session.activeSession?.activeBranch?.name ?? 'main'
+  const branchCount = session.activeSession?.branches.length ?? 0
+  const pendingEditCount = session.pendingEditCount
 
   const sendDisabled = !inputDraft.trim() || session.sending || !config.model
 
@@ -128,14 +123,6 @@ export function ChatPage() {
   const handleCreateSession = async () => {
     await session.createSession(config)
     setMobileSidebarOpen(false)
-  }
-
-  const focusComposer = () => {
-    window.requestAnimationFrame(() => {
-      const composer = document.querySelector<HTMLTextAreaElement>('[data-chat-composer]')
-      composer?.focus()
-      composer?.setSelectionRange(composer.value.length, composer.value.length)
-    })
   }
 
   const handleSelectSession = (sessionId: string) => {
@@ -159,48 +146,48 @@ export function ChatPage() {
     await session.renameSession(sessionId, title)
   }
 
-  const handleEditMessage = (message: ChatMessage) => {
-    setInputDraft(message.content)
-    focusComposer()
+  const handleEditMessage = (message: ChatMessage, content: string) => {
+    const baselineContent = message.originalContent ?? message.content
+    session.setPendingEdit(message.id, content)
+    toast.success(content === baselineContent ? '已撤销本地修改' : '已加入待提交修改')
+  }
+
+  const handleRegenerateMessage = async (message: ChatMessage) => {
+    await session.regenerateAssistantMessage(message.id, config)
+  }
+
+  const handleSelectAssistantMessage = async (messageId: string) => {
+    await session.selectAssistantMessage(messageId)
   }
 
   const handleBranchMessage = async (message: ChatMessage) => {
-    pendingInputDraftRef.current = message.content
-
-    try {
-      await session.createSession(config)
-      setMobileSidebarOpen(false)
-      toast.success('已创建新分支，会话内容已放入输入框')
-      focusComposer()
-    } catch {
-      pendingInputDraftRef.current = null
-      toast.error('创建分支失败，请稍后重试')
-    }
-  }
-
-  const handleTogglePinMessage = (message: ChatMessage) => {
-    if (!activeSessionId) {
+    if (session.sending || !session.activeSessionId) {
       return
     }
 
-    let nextPinned = false
+    await session.createBranch(message.id)
+    toast.success('已从当前节点创建新分支')
+  }
 
-    setPinnedMessagesBySession((current) => {
-      const currentIds = current[activeSessionId] ?? []
-      const hasPinned = currentIds.includes(message.id)
-      const nextIds = hasPinned
-        ? currentIds.filter((item) => item !== message.id)
-        : [...currentIds, message.id]
+  const handleSelectBranch = async (branchId: string) => {
+    if (
+      session.sending ||
+      !session.activeSessionId ||
+      branchId === session.activeSession?.activeBranchId
+    ) {
+      return
+    }
 
-      nextPinned = !hasPinned
+    await session.selectBranch(branchId)
+  }
 
-      return {
-        ...current,
-        [activeSessionId]: nextIds
-      }
-    })
-
-    toast.success(nextPinned ? '已标记消息' : '已取消标记')
+  const handleTogglePinMessage = async (message: ChatMessage) => {
+    try {
+      await session.toggleMessagePin(message.id, !message.pinned)
+      toast.success(message.pinned ? '已取消标记消息' : '已标记消息')
+    } catch {
+      toast.error('更新消息标记失败')
+    }
   }
 
   const handleOpenChatSidebar = () => {
@@ -258,7 +245,8 @@ export function ChatPage() {
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col bg-background">
+      <section className="flex min-w-0 flex-1 bg-background">
+        <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-4 border-b border-border bg-background/96 px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -282,6 +270,27 @@ export function ChatPage() {
                     ? `${session.messages.length} 条消息`
                     : '从左侧选择会话，或直接开始新的提问。'}
                 </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 rounded-full border border-border bg-panel px-2 py-1">
+                    <GitBranch className="size-3.5" />
+                    <span>分支</span>
+                    <Select
+                      value={session.activeSession?.activeBranchId ?? ''}
+                      onChange={(event) => void handleSelectBranch(event.target.value)}
+                      className="h-8 min-w-[132px] border-0 bg-transparent px-2 py-0 text-xs shadow-none focus:ring-0"
+                      disabled={(session.activeSession?.branches.length ?? 0) <= 1}
+                    >
+                      {(session.activeSession?.branches ?? []).map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <span>{branchCount} 条路径已载入</span>
+                  <span>当前 {activeBranchName}</span>
+                  {pendingEditCount > 0 ? <span>{pendingEditCount} 处修改待提交</span> : null}
+                </div>
               </div>
             </div>
           </div>
@@ -314,10 +323,12 @@ export function ChatPage() {
 
         <div className="flex min-h-0 flex-1 flex-col">
           <MessageList
-            pinnedMessageIds={pinnedMessageIds}
             messages={session.messages}
+            messageNodes={session.activeSession?.messageNodes ?? {}}
             onBranchMessage={(message) => void handleBranchMessage(message)}
             onEditMessage={handleEditMessage}
+            onRegenerateMessage={(message) => void handleRegenerateMessage(message)}
+            onSelectSiblingMessage={(messageId) => void handleSelectAssistantMessage(messageId)}
             onStarterPromptSelect={(prompt) => setInputDraft(prompt)}
             onTogglePinMessage={handleTogglePinMessage}
           />
@@ -330,6 +341,14 @@ export function ChatPage() {
             onSend={() => void handleSend()}
           />
         </div>
+        </div>
+
+        <ConversationTreePanel
+          activeBranchId={session.activeSession?.activeBranchId ?? null}
+          branches={session.activeSession?.branches ?? []}
+          messageNodes={session.activeSession?.messageNodes ?? {}}
+          onSelectBranch={(branchId) => void handleSelectBranch(branchId)}
+        />
       </section>
 
       <AdvancedSettingsDrawer

@@ -1,5 +1,5 @@
 export type ChatStrategy = 'balanced' | 'cheapest' | 'quality'
-export type ChatRole = 'assistant' | 'system' | 'tool' | 'user'
+export type ChatRole = 'assistant' | 'summary' | 'system' | 'tool' | 'user'
 export type ChatMessageStatus = 'completed' | 'error' | 'pending'
 
 export type ChatConfig = {
@@ -24,12 +24,29 @@ export type ChatMessage = {
   errorMessage?: string | null
   id: string
   loading?: boolean
+  originalContent?: string | null
+  parentId: string | null
+  pendingEdit?: boolean
+  modifiedFrom: string | null
+  pinned: boolean
+  archived: boolean
+  stale: boolean
   role: ChatRole
   status: ChatMessageStatus
   timestamp: number
 }
 
+export type ChatBranch = {
+  id: string
+  name: string
+  headMessageId: string | null
+  baseMessageId: string | null
+}
+
 export type ChatSession = {
+  activeBranch: ChatBranch | null
+  activeBranchId: string | null
+  branches: ChatBranch[]
   createdAt: number
   draftConfig: ChatConfig
   loading?: boolean
@@ -40,6 +57,7 @@ export type ChatSession = {
   lastMessageRole: ChatRole | null
   messageCount: number
   messages: ChatMessage[]
+  messageNodes: Record<string, ChatMessage>
   messagesLoaded: boolean
   title: string
   updatedAt: number

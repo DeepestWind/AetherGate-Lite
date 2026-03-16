@@ -1,4 +1,5 @@
 import {
+  type ChatBranch,
   type ChatCallInfo,
   type ChatConfig,
   type ChatMessage,
@@ -199,12 +200,31 @@ export function normalizeChatMessage(payload: unknown): ChatMessage {
     content: String(readValue(row, ['content'], '')),
     status: String(readValue(row, ['status'], 'completed')) as ChatMessage['status'],
     timestamp: toNumber(readValue(row, ['timestamp'], Date.now())),
+    parentId:
+      String(readValue(row, ['parentId', 'parent_id'], '')) || null,
+    modifiedFrom:
+      String(readValue(row, ['modifiedFrom', 'modified_from'], '')) || null,
+    pinned: Boolean(readValue(row, ['pinned'], false)),
+    archived: Boolean(readValue(row, ['archived'], false)),
+    stale: Boolean(readValue(row, ['stale'], false)),
     errorMessage: String(readValue(row, ['errorMessage', 'error_message'], '')) || null,
-    callInfo: normalizeChatCallInfo(readValue(row, ['callInfo', 'call_info'], null))
+    callInfo: normalizeChatCallInfo(readValue(row, ['callInfo', 'call_info'], null)),
+    loading: String(readValue(row, ['status'], 'completed')) === 'pending'
   }
 }
 
-function getLastCallInfo(messages: ChatMessage[]) {
+export function normalizeChatBranch(payload: unknown): ChatBranch {
+  const row = isRecord(payload) ? payload : {}
+
+  return {
+    id: String(readValue(row, ['id'], crypto.randomUUID())),
+    name: String(readValue(row, ['name'], 'main')),
+    headMessageId: String(readValue(row, ['headMessageId', 'head_message_id'], '')) || null,
+    baseMessageId: String(readValue(row, ['baseMessageId', 'base_message_id'], '')) || null
+  }
+}
+
+export function getLastCallInfo(messages: ChatMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.callInfo) {
       return messages[index].callInfo
@@ -214,13 +234,122 @@ function getLastCallInfo(messages: ChatMessage[]) {
   return null
 }
 
-export function normalizeChatSession(payload: unknown): ChatSession {
-  const row = isRecord(payload) ? payload : {}
-  const messages = Array.isArray(readValue(row, ['messages'], []))
-    ? (readValue(row, ['messages'], []) as unknown[]).map(normalizeChatMessage)
-    : []
+function normalizeMessageNodeMap(payload: unknown) {
+  if (!isRecord(payload)) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(payload).map(([messageId, value]) => {
+      const normalized = normalizeChatMessage(
+        isRecord(value)
+          ? {
+              ...value,
+              id: readValue(value, ['id'], messageId)
+            }
+          : { id: messageId }
+      )
+      return [normalized.id, normalized]
+    })
+  ) as Record<string, ChatMessage>
+}
+
+function buildMessageNodeMap(messages: ChatMessage[]) {
+  return Object.fromEntries(messages.map((message) => [message.id, message]))
+}
+
+export function getActiveChatBranch(
+  branches: ChatBranch[],
+  activeBranchId: string | null
+): ChatBranch | null {
+  if (activeBranchId) {
+    const activeBranch = branches.find((branch) => branch.id === activeBranchId)
+    if (activeBranch) {
+      return activeBranch
+    }
+  }
+
+  return branches[0] ?? null
+}
+
+export function flattenChatBranchMessages(
+  messageNodes: Record<string, ChatMessage>,
+  branches: ChatBranch[],
+  activeBranchId: string | null,
+  fallbackMessages: ChatMessage[] = []
+) {
+  const activeBranch = getActiveChatBranch(branches, activeBranchId)
+  if (!activeBranch?.headMessageId) {
+    return fallbackMessages
+  }
+
+  const messages: ChatMessage[] = []
+  const visited = new Set<string>()
+  let currentId: string | null = activeBranch.headMessageId
+
+  while (currentId) {
+    if (visited.has(currentId)) {
+      break
+    }
+
+    const message: ChatMessage | undefined = messageNodes[currentId]
+    if (!message) {
+      break
+    }
+
+    if (!message.archived) {
+      messages.push(message)
+    }
+
+    visited.add(currentId)
+    currentId = message.parentId
+  }
+
+  if (messages.length === 0) {
+    return fallbackMessages
+  }
+
+  return [...messages].reverse()
+}
+
+export function resolveChatSessionGraph(
+  input: Omit<ChatSession, 'activeBranch' | 'lastCallInfo' | 'messages'> & {
+    messages?: ChatMessage[]
+  }
+): ChatSession {
+  const messages = flattenChatBranchMessages(
+    input.messageNodes,
+    input.branches,
+    input.activeBranchId,
+    input.messages ?? []
+  )
+  const activeBranch = getActiveChatBranch(input.branches, input.activeBranchId)
 
   return {
+    ...input,
+    activeBranch,
+    messages,
+    lastCallInfo: getLastCallInfo(messages)
+  }
+}
+
+export function normalizeChatSession(payload: unknown): ChatSession {
+  const row = isRecord(payload) ? payload : {}
+  const fallbackMessages = Array.isArray(readValue(row, ['messages'], []))
+    ? (readValue(row, ['messages'], []) as unknown[]).map(normalizeChatMessage)
+    : []
+  const branches = Array.isArray(readValue(row, ['branches'], []))
+    ? (readValue(row, ['branches'], []) as unknown[]).map(normalizeChatBranch)
+    : []
+  const messageNodes =
+    Object.keys(normalizeMessageNodeMap(readValue(row, ['messageNodes', 'message_nodes'], {})))
+      .length > 0
+      ? normalizeMessageNodeMap(readValue(row, ['messageNodes', 'message_nodes'], {}))
+      : buildMessageNodeMap(fallbackMessages)
+  const activeBranchId =
+    String(readValue(row, ['activeBranchId', 'active_branch_id'], '')) || null
+
+  return resolveChatSessionGraph({
     id: String(readValue(row, ['id'], crypto.randomUUID())),
     title: String(readValue(row, ['title'], '新对话')),
     draftConfig: normalizeChatConfig(
@@ -236,13 +365,20 @@ export function normalizeChatSession(payload: unknown): ChatSession {
       (String(
         readValue(row, ['lastMessageRole', 'last_message_role'], '')
       ) as ChatSession['lastMessageRole']) || null,
-    messageCount: toNumber(readValue(row, ['messageCount', 'message_count'], messages.length)),
+    activeBranchId,
+    branches,
+    messageCount: toNumber(
+      readValue(row, ['messageCount', 'message_count'], fallbackMessages.length)
+    ),
     createdAt: toNumber(readValue(row, ['createdAt', 'created_at'], Date.now())),
     updatedAt: toNumber(readValue(row, ['updatedAt', 'updated_at'], Date.now())),
-    messages,
-    messagesLoaded: Array.isArray(readValue(row, ['messages'], null)),
-    lastCallInfo: getLastCallInfo(messages)
-  }
+    messageNodes,
+    messages: fallbackMessages,
+    messagesLoaded:
+      Array.isArray(readValue(row, ['messages'], null)) ||
+      Array.isArray(readValue(row, ['branches'], null)) ||
+      isRecord(readValue(row, ['messageNodes', 'message_nodes'], null))
+  })
 }
 
 export function normalizeChatSessions(payload: unknown): ChatSession[] {
