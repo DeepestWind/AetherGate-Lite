@@ -2,7 +2,6 @@ import {
   BarChart3,
   Link2,
   MessageSquare,
-  Minus,
   Monitor,
   Moon,
   PanelLeftClose,
@@ -12,7 +11,7 @@ import {
   SunMedium,
   X
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { useApiAccessState } from '@/shared/auth/use-api-access'
 import { cn } from '@/shared/lib/cn'
@@ -31,38 +30,28 @@ import { Input } from '@/shared/ui/input'
 
 type ThemeMode = 'light' | 'dark' | 'system'
 
-const navigationGroups = [
+const SIDEBAR_LABEL_REVEAL_MS = 130
+
+const navigationItems = [
   {
-    key: 'chat',
+    to: '/chat',
     label: '聊天',
-    items: [
-      {
-        to: '/chat',
-        label: '聊天',
-        icon: MessageSquare
-      }
-    ]
+    icon: MessageSquare
   },
   {
-    key: 'control',
-    label: '控制',
-    items: [
-      {
-        to: '/dashboard',
-        label: '概览',
-        icon: BarChart3
-      },
-      {
-        to: '/endpoints',
-        label: '入口点',
-        icon: Link2
-      },
-      {
-        to: '/prompts',
-        label: '模板',
-        icon: Sparkles
-      }
-    ]
+    to: '/dashboard',
+    label: '概览',
+    icon: BarChart3
+  },
+  {
+    to: '/endpoints',
+    label: '入口点',
+    icon: Link2
+  },
+  {
+    to: '/prompts',
+    label: '模板',
+    icon: Sparkles
   }
 ] as const
 
@@ -108,14 +97,21 @@ function resolveTheme(mode: ThemeMode) {
 }
 
 function ThemeToggle({
+  compact = false,
   themeMode,
   onChange
 }: {
+  compact?: boolean
   onChange: (next: ThemeMode) => void
   themeMode: ThemeMode
 }) {
   return (
-    <div className="inline-flex items-center rounded-full border border-border bg-panel p-1 shadow-card">
+    <div
+      className={cn(
+        'inline-flex items-center rounded-full border border-border bg-panel shadow-card',
+        compact ? 'p-[3px]' : 'p-1'
+      )}
+    >
       {themeChoices.map(({ label, mode, icon: Icon }) => {
         const active = themeMode === mode
 
@@ -125,7 +121,8 @@ function ThemeToggle({
             type="button"
             onClick={() => onChange(mode)}
             className={cn(
-              'inline-flex size-7 items-center justify-center rounded-full transition',
+              'inline-flex items-center justify-center rounded-full transition',
+              compact ? 'size-6' : 'size-7',
               active
                 ? 'bg-accent text-white shadow-[0_10px_20px_-14px_rgba(223,90,79,0.88)]'
                 : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
@@ -141,6 +138,50 @@ function ThemeToggle({
   )
 }
 
+function DesktopSidebarFooter({
+  hasHydrated,
+  hasToken,
+  labelVisible,
+  onOpenTokenDialog,
+  onThemeChange,
+  sidebarCollapsed,
+  themeMode
+}: {
+  hasHydrated: boolean
+  hasToken: boolean
+  labelVisible: boolean
+  onOpenTokenDialog: () => void
+  onThemeChange: (next: ThemeMode) => void
+  sidebarCollapsed: boolean
+  themeMode: ThemeMode
+}) {
+  const compact = sidebarCollapsed || !labelVisible
+
+  return (
+    <div
+      className={cn(
+        'hidden border-t border-border pt-3 lg:flex lg:flex-col lg:gap-3',
+        compact ? 'items-center px-2' : 'px-3'
+      )}
+    >
+      <Button
+        variant="outline"
+        size={compact ? 'icon' : 'sm'}
+        className={cn(compact ? 'size-11 rounded-[18px]' : 'w-full justify-start')}
+        onClick={onOpenTokenDialog}
+        aria-label="配置 Token"
+      >
+        <Shield className="size-4" />
+        {compact ? null : !hasHydrated ? '恢复会话中' : hasToken ? '已配置 Token' : '配置 Token'}
+      </Button>
+
+      <div className={cn('flex w-full', compact ? 'justify-center' : 'justify-start')}>
+        <ThemeToggle compact={compact} themeMode={themeMode} onChange={onThemeChange} />
+      </div>
+    </div>
+  )
+}
+
 function BrandMark() {
   return (
     <div className="relative flex size-8 items-center justify-center">
@@ -150,6 +191,78 @@ function BrandMark() {
       <span className="absolute right-1 top-2.5 size-1.5 rounded-full bg-accent" />
       <span className="absolute bottom-1 left-2.5 size-1 rounded-full bg-accent" />
       <span className="absolute bottom-1 right-2.5 size-1 rounded-full bg-accent" />
+    </div>
+  )
+}
+
+function BrandRail({
+  collapsed,
+  labelVisible,
+  onToggle
+}: {
+  collapsed: boolean
+  labelVisible: boolean
+  onToggle: () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'hidden items-center transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:flex',
+        collapsed ? 'px-0' : 'px-0'
+      )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          'group flex h-12 w-full items-center overflow-hidden rounded-[22px] transition-[padding,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-secondary',
+          collapsed ? 'px-[14px]' : 'px-3'
+        )}
+        aria-label={collapsed ? '展开主菜单' : '折叠主菜单'}
+      >
+        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-[16px]">
+          <span
+            className={cn(
+              'transition-opacity duration-200 ease-out',
+              collapsed && 'group-hover:opacity-0'
+            )}
+          >
+            <BrandMark />
+          </span>
+          <span
+            className={cn(
+              'absolute inset-0 flex items-center justify-center text-muted-foreground transition-opacity duration-200 ease-out',
+              collapsed ? 'opacity-0 group-hover:opacity-100' : 'opacity-0'
+            )}
+          >
+            <PanelLeftOpen className="size-5" />
+          </span>
+        </span>
+
+        <div
+          className={cn(
+            'min-w-0 overflow-hidden text-left transition-[max-width,opacity,transform,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+            collapsed || !labelVisible
+              ? 'ml-0 max-w-0 -translate-x-2 opacity-0'
+              : 'ml-3 max-w-[148px] translate-x-0 opacity-100'
+          )}
+        >
+          <div className="truncate text-[15px] font-semibold tracking-[0.01em] text-foreground">
+            AetherGate
+          </div>
+        </div>
+
+        <span
+          className={cn(
+            'ml-auto inline-flex items-center justify-center overflow-hidden rounded-[14px] text-muted-foreground transition-[width,opacity,transform,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:bg-background group-hover:text-foreground',
+            collapsed || !labelVisible
+              ? 'w-0 opacity-0 translate-x-2'
+              : 'size-9 opacity-100 translate-x-0'
+          )}
+        >
+          <PanelLeftClose className="size-4 shrink-0" />
+        </span>
+      </button>
     </div>
   )
 }
@@ -223,19 +336,34 @@ export function AppShell() {
   const location = useLocation()
   const token = useSessionStore((state) => state.token)
   const { hasHydrated, hasToken } = useApiAccessState()
-  const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
-  const [didAutoPromptForToken, setDidAutoPromptForToken] = useState(false)
   const {
+    collapseSidebar,
+    expandSidebar,
     mobileNavOpen,
-    navGroupsCollapsed,
     setMobileNavOpen,
     setThemeMode,
     sidebarCollapsed,
     themeMode,
-    toggleMobileNav,
-    toggleNavGroup,
-    toggleSidebar
+    toggleMobileNav
   } = useConsoleUiStore()
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
+  const [didAutoPromptForToken, setDidAutoPromptForToken] = useState(false)
+  const [sidebarLabelVisible, setSidebarLabelVisible] = useState(() => !sidebarCollapsed)
+  const hasMountedRef = useRef(false)
+  const labelTimerRef = useRef<number | null>(null)
+  const collapseFrameRef = useRef<number | null>(null)
+
+  const clearSidebarTransitionTimers = useCallback(() => {
+    if (labelTimerRef.current !== null) {
+      window.clearTimeout(labelTimerRef.current)
+      labelTimerRef.current = null
+    }
+
+    if (collapseFrameRef.current !== null) {
+      window.cancelAnimationFrame(collapseFrameRef.current)
+      collapseFrameRef.current = null
+    }
+  }, [])
 
   const currentPage = useMemo(() => {
     if (location.pathname.startsWith('/chat')) {
@@ -277,57 +405,78 @@ export function AppShell() {
     setDidAutoPromptForToken(true)
   }, [didAutoPromptForToken, hasHydrated, hasToken])
 
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true
+      setSidebarLabelVisible(!sidebarCollapsed)
+      return
+    }
+
+    clearSidebarTransitionTimers()
+
+    if (sidebarCollapsed) {
+      setSidebarLabelVisible(false)
+      return
+    }
+
+    setSidebarLabelVisible(false)
+    labelTimerRef.current = window.setTimeout(() => {
+      setSidebarLabelVisible(true)
+      labelTimerRef.current = null
+    }, SIDEBAR_LABEL_REVEAL_MS)
+
+    return () => {
+      clearSidebarTransitionTimers()
+    }
+  }, [clearSidebarTransitionTimers, sidebarCollapsed])
+
   const handleNavToggle = () => {
     if (window.innerWidth < 1024) {
       toggleMobileNav()
       return
     }
 
-    toggleSidebar()
+    clearSidebarTransitionTimers()
+
+    if (sidebarCollapsed) {
+      expandSidebar()
+      labelTimerRef.current = window.setTimeout(() => {
+        setSidebarLabelVisible(true)
+        labelTimerRef.current = null
+      }, SIDEBAR_LABEL_REVEAL_MS)
+      return
+    }
+
+    setSidebarLabelVisible(false)
+    collapseFrameRef.current = window.requestAnimationFrame(() => {
+      collapseSidebar()
+      collapseFrameRef.current = null
+    })
   }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b border-border bg-background/88 backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-border bg-background/88 backdrop-blur-xl lg:hidden">
         <div className="flex min-h-[60px] items-center px-4 sm:px-6 lg:px-0">
-          <div
-            className={cn(
-              'flex items-center transition-[width] duration-200 ease-out lg:min-h-[60px] lg:border-r lg:border-border',
-              sidebarCollapsed ? 'lg:w-[76px] lg:justify-center' : 'lg:w-[224px] lg:justify-end'
-            )}
-          >
+          <div className="flex min-w-0 items-center gap-3 lg:hidden">
             <button
               type="button"
               onClick={handleNavToggle}
-              className={cn(
-                'inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition hover:border-border hover:bg-panel hover:text-foreground',
-                sidebarCollapsed ? 'lg:mx-auto' : 'lg:mr-4'
-              )}
+              className="inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition hover:border-border hover:bg-panel hover:text-foreground"
               aria-label="切换导航"
             >
-              {mobileNavOpen ? (
-                <X className="size-5 lg:hidden" />
-              ) : sidebarCollapsed ? (
-                <PanelLeftOpen className="size-5" />
-              ) : (
-                <PanelLeftClose className="size-5" />
-              )}
+              {mobileNavOpen ? <X className="size-5" /> : <PanelLeftOpen className="size-5" />}
             </button>
-          </div>
 
-          <div className="flex min-w-0 items-center gap-3 px-4 lg:px-5">
-            <BrandMark />
-            <div className="min-w-0">
-              <div className="truncate text-[12px] font-bold uppercase tracking-[0.08em] text-foreground">
-                AETHERGATE LITE
-              </div>
-              <div className="truncate text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                Personal Gateway Console
+            <div className="flex min-w-0 items-center gap-3">
+              <BrandMark />
+              <div className="min-w-0 truncate text-[13px] font-semibold tracking-[0.01em] text-foreground">
+                AetherGate
               </div>
             </div>
           </div>
 
-          <div className="ml-auto flex items-center gap-2 overflow-x-auto py-2 lg:px-8">
+          <div className="ml-auto flex items-center gap-2 overflow-x-auto py-2">
             <Button variant="outline" size="sm" onClick={() => setTokenDialogOpen(true)}>
               <Shield className="size-4" />
               {!hasHydrated ? '恢复会话中' : token ? '已配置 Token' : '配置 Token'}
@@ -347,8 +496,8 @@ export function AppShell() {
         className={cn(
           'relative flex',
           isChatPage
-            ? 'h-[calc(100vh-61px)] min-h-0 overflow-hidden'
-            : 'min-h-[calc(100vh-61px)] items-start'
+            ? 'h-[calc(100vh-61px)] min-h-0 overflow-hidden lg:h-screen'
+            : 'min-h-[calc(100vh-61px)] items-start lg:min-h-screen'
         )}
       >
         {mobileNavOpen ? (
@@ -362,78 +511,72 @@ export function AppShell() {
 
         <aside
           className={cn(
-            'fixed bottom-0 left-0 top-[61px] z-30 flex w-[224px] flex-col border-r border-border bg-background/98 px-3 py-4 transition-[width,padding,transform] duration-200 ease-out lg:sticky lg:top-[61px] lg:z-0 lg:h-[calc(100vh-61px)] lg:bg-transparent',
+            'fixed bottom-0 left-0 top-[61px] z-30 flex w-[248px] flex-col border-r border-border bg-background/98 px-3 py-4 transition-[width,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:sticky lg:top-0 lg:z-0 lg:h-screen lg:bg-background/92',
             mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-            sidebarCollapsed ? 'lg:w-[76px] lg:px-2' : 'lg:w-[224px] lg:px-3'
+            sidebarCollapsed ? 'lg:w-[92px]' : 'lg:w-[248px]'
           )}
         >
+          <div className="hidden pb-4 lg:block">
+            <BrandRail
+              collapsed={sidebarCollapsed}
+              labelVisible={sidebarLabelVisible}
+              onToggle={handleNavToggle}
+            />
+          </div>
+
           <nav className="min-h-0 flex-1 overflow-y-auto">
-            {navigationGroups.map((group) => {
-              const collapsed = navGroupsCollapsed[group.key]
+            <div className="space-y-1">
+              {navigationItems.map((item) => {
+                const Icon = item.icon
 
-              return (
-                <section key={group.key} className="mb-3 last:mb-0">
-                  <button
-                    type="button"
-                    onClick={() => toggleNavGroup(group.key)}
-                    className={cn(
-                      'mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[10px] font-semibold tracking-[0.06em] text-muted-foreground transition hover:bg-secondary hover:text-foreground',
-                      sidebarCollapsed && 'lg:justify-center lg:px-0'
-                    )}
-                  >
-                    <span>{group.label}</span>
-                    <span className={cn('text-sm', sidebarCollapsed && 'lg:hidden')}>
-                      {collapsed ? '+' : <Minus className="size-4" />}
-                    </span>
-                  </button>
-
-                  <div className={cn('space-y-0.5', collapsed && 'hidden')}>
-                    {group.items.map((item) => {
-                      const Icon = item.icon
-
-                      return (
-                        <NavLink
-                          key={item.to}
-                          to={item.to}
-                          onClick={() => setMobileNavOpen(false)}
-                          className={({ isActive }) =>
-                            cn(
-                              'flex items-center gap-2.5 overflow-hidden border transition',
-                              sidebarCollapsed
-                                ? 'mx-auto size-12 justify-center rounded-2xl px-0 py-0'
-                                : 'justify-start rounded-xl px-3 py-2.5',
-                              isActive
-                                ? 'border-accent/10 bg-accent-soft text-foreground'
-                                : 'border-transparent text-foreground-soft hover:bg-panel-strong hover:text-foreground'
-                            )
-                          }
-                        >
-                          <span
-                            className={cn(
-                              'inline-flex size-5 items-center justify-center text-muted-foreground',
-                              location.pathname.startsWith(item.to) && 'text-accent'
-                            )}
-                          >
-                            <Icon className="size-[15px]" />
-                          </span>
-                          <span
-                            className={cn(
-                              'whitespace-nowrap text-[14px] font-medium transition-all duration-200 ease-out',
-                              sidebarCollapsed
-                                ? 'lg:max-w-0 lg:translate-x-[-8px] lg:opacity-0'
-                                : 'lg:max-w-[120px] lg:translate-x-0 lg:opacity-100'
-                            )}
-                          >
-                            {item.label}
-                          </span>
-                        </NavLink>
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    onClick={() => setMobileNavOpen(false)}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex h-14 w-full items-center overflow-hidden rounded-[24px] text-left transition-[padding,gap,background-color,color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                        sidebarCollapsed ? 'gap-0 px-6' : 'gap-3 px-4',
+                        isActive
+                          ? 'bg-accent-soft text-foreground'
+                          : 'text-foreground-soft hover:bg-panel-strong hover:text-foreground'
                       )
-                    })}
-                  </div>
-                </section>
-              )
-            })}
+                    }
+                  >
+                    <span
+                      className={cn(
+                        'inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-200',
+                        location.pathname.startsWith(item.to) && 'text-accent'
+                      )}
+                    >
+                      <Icon className="size-[15px]" />
+                    </span>
+                    <span
+                      className={cn(
+                        'min-w-0 overflow-hidden whitespace-nowrap text-[15px] font-medium transition-[max-width,opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                        sidebarCollapsed || !sidebarLabelVisible
+                          ? 'lg:max-w-0 lg:translate-x-[-8px] lg:opacity-0'
+                          : 'lg:max-w-[120px] lg:translate-x-0 lg:opacity-100'
+                      )}
+                    >
+                      {item.label}
+                    </span>
+                  </NavLink>
+                )
+              })}
+            </div>
           </nav>
+
+          <DesktopSidebarFooter
+            hasHydrated={hasHydrated}
+            hasToken={hasToken}
+            labelVisible={sidebarLabelVisible}
+            onOpenTokenDialog={() => setTokenDialogOpen(true)}
+            onThemeChange={setThemeMode}
+            sidebarCollapsed={sidebarCollapsed}
+            themeMode={themeMode}
+          />
         </aside>
 
         <div className={cn('min-w-0 flex-1', isChatPage && 'min-h-0')}>

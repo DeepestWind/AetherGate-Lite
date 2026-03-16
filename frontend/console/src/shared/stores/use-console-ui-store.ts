@@ -1,26 +1,25 @@
 import { create } from 'zustand'
 
-type NavGroupKey = 'chat' | 'control'
 type ThemeMode = 'light' | 'dark' | 'system'
 
 type ConsoleUiState = {
+  collapseSidebar: () => void
+  expandSidebar: () => void
   mobileNavOpen: boolean
-  navGroupsCollapsed: Record<NavGroupKey, boolean>
+  setSidebarCollapsed: (collapsed: boolean) => void
   sidebarCollapsed: boolean
   setMobileNavOpen: (open: boolean) => void
   setThemeMode: (value: ThemeMode) => void
   themeMode: ThemeMode
   toggleMobileNav: () => void
-  toggleNavGroup: (group: NavGroupKey) => void
   toggleSidebar: () => void
 }
 
 export const useConsoleUiStore = create<ConsoleUiState>((set) => ({
+  collapseSidebar: () => set({ sidebarCollapsed: true }),
+  expandSidebar: () => set({ sidebarCollapsed: false }),
   mobileNavOpen: false,
-  navGroupsCollapsed: {
-    chat: false,
-    control: false
-  },
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   sidebarCollapsed: false,
   themeMode: 'light',
   setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
@@ -28,13 +27,6 @@ export const useConsoleUiStore = create<ConsoleUiState>((set) => ({
   toggleMobileNav: () =>
     set((state) => ({
       mobileNavOpen: !state.mobileNavOpen
-    })),
-  toggleNavGroup: (group) =>
-    set((state) => ({
-      navGroupsCollapsed: {
-        ...state.navGroupsCollapsed,
-        [group]: !state.navGroupsCollapsed[group]
-      }
     })),
   toggleSidebar: () =>
     set((state) => ({
