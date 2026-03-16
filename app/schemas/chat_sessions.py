@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 ChatStrategy = Literal["balanced", "cheapest", "quality"]
-ChatMessageRole = Literal["assistant", "system", "tool", "user"]
+ChatMessageRole = Literal["assistant", "summary", "system", "tool", "user"]
 ChatMessageStatus = Literal["completed", "error", "pending"]
 
 
@@ -35,6 +35,31 @@ class ChatConversationMessageCreate(BaseModel):
     draft_config: ChatConversationConfig
 
 
+class ChatConversationMessageNodeEdit(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class ChatConversationMessageCommitCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+    draft_config: ChatConversationConfig
+    modified_nodes: list[ChatConversationMessageNodeEdit] = Field(default_factory=list)
+
+
+class ChatConversationMessageRegenerateCreate(BaseModel):
+    draft_config: ChatConversationConfig
+    modified_nodes: list[ChatConversationMessageNodeEdit] = Field(default_factory=list)
+
+
+class ChatConversationMessagePinUpdate(BaseModel):
+    pinned: bool = False
+
+
+class ChatConversationBranchCreate(BaseModel):
+    base_message_id: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, max_length=80)
+
+
 class ChatCallInfoResponse(BaseModel):
     cache_hit: bool
     completion_tokens: int
@@ -58,8 +83,20 @@ class ChatMessageResponse(BaseModel):
     content: str
     status: ChatMessageStatus
     timestamp: int
+    parent_id: str | None = None
+    modified_from: str | None = None
+    pinned: bool = False
+    archived: bool = False
+    stale: bool = False
     call_info: ChatCallInfoResponse | None = None
     error_message: str | None = None
+
+
+class ChatBranchResponse(BaseModel):
+    id: str
+    name: str
+    head_message_id: str | None = None
+    base_message_id: str | None = None
 
 
 class ChatConversationSummaryResponse(BaseModel):
@@ -69,10 +106,13 @@ class ChatConversationSummaryResponse(BaseModel):
     last_message_at: int | None = None
     last_message_preview: str | None = None
     last_message_role: ChatMessageRole | None = None
+    active_branch_id: str | None = None
     message_count: int
     created_at: int
     updated_at: int
 
 
 class ChatConversationResponse(ChatConversationSummaryResponse):
+    branches: list[ChatBranchResponse] = Field(default_factory=list)
     messages: list[ChatMessageResponse] = Field(default_factory=list)
+    message_nodes: dict[str, ChatMessageResponse] = Field(default_factory=dict)

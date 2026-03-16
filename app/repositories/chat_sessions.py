@@ -24,6 +24,7 @@ class ChatConversationRepository:
         if include_messages:
             stmt = stmt.options(
                 selectinload(ChatConversation.messages).joinedload(ChatMessageRecord.request_log),
+                selectinload(ChatConversation.branches),
             )
         return db.scalar(stmt)
 

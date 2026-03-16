@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { normalizeChatSession, normalizeChatSessions } from '@/features/chat/chat-adapters'
 import {
+  getActiveChatBranch,
+  normalizeChatSession,
+  normalizeChatSessions,
+  resolveChatSessionGraph
+} from '@/features/chat/chat-adapters'
+import {
+  type ChatBranch,
   type ChatCallInfo,
   type ChatConfig,
   type ChatMessage,
@@ -8,12 +14,18 @@ import {
   defaultChatConfig
 } from '@/features/chat/chat-types'
 import {
+  activateConversationBranch,
+  createConversationBranch,
   createChatConversation,
   deleteChatConversation,
   getChatConversation,
   listChatConversations,
+  regenerateConversationMessage,
   renameChatConversation,
+  selectConversationMessage,
   sendConversationMessage,
+  sendConversationMessageWithEdits,
+  updateConversationMessagePin,
   updateChatConversationConfig
 } from '@/shared/api/modules/chat'
 
@@ -25,13 +37,25 @@ type UseChatSessionResult = {
   initializing: boolean
   lastCallInfo: ChatCallInfo | null
   messages: ChatMessage[]
+  pendingEditCount: number
+  pendingEdits: Record<string, string>
+  clearPendingEdit: (messageId: string) => void
+  createBranch: (baseMessageId: string, name?: string) => Promise<void>
+  regenerateAssistantMessage: (messageId: string, config: ChatConfig) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
   saveDraftConfig: (config: ChatConfig) => Promise<void>
+  selectAssistantMessage: (messageId: string) => Promise<void>
+  selectBranch: (branchId: string) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
+  setPendingEdit: (messageId: string, content: string) => void
   sendChat: (content: string, config: ChatConfig) => Promise<void>
   sessions: ChatSession[]
   sending: boolean
+  toggleMessagePin: (messageId: string, pinned: boolean) => Promise<void>
 }
+
+type PendingEditsBySession = Record<string, Record<string, string>>
+type AssistantPreviewSelectionsBySession = Record<string, Record<string, Record<string, string>>>
 
 function buildErrorCallInfo(strategy: ChatConfig['strategy'], latencyMs: number): ChatCallInfo {
   return {
@@ -52,33 +76,39 @@ function buildErrorCallInfo(strategy: ChatConfig['strategy'], latencyMs: number)
   }
 }
 
-function getLastCallInfo(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.callInfo) {
-      return messages[index].callInfo
-    }
+function buildSessionGraph(
+  session: Omit<ChatSession, 'activeBranch' | 'lastCallInfo' | 'messages'> & {
+    messages?: ChatMessage[]
   }
-
-  return null
+) {
+  return resolveChatSessionGraph(session)
 }
 
 function mergeSessionState(
   currentSession: ChatSession | undefined,
   incoming: ChatSession
 ): ChatSession {
-  const shouldPreserveMessages = !incoming.messagesLoaded && Boolean(currentSession?.messagesLoaded)
-  const messages = shouldPreserveMessages ? (currentSession?.messages ?? []) : incoming.messages
-  const messagesLoaded = shouldPreserveMessages
+  const shouldPreserveGraph = !incoming.messagesLoaded && Boolean(currentSession?.messagesLoaded)
+  const messagesLoaded = shouldPreserveGraph
     ? (currentSession?.messagesLoaded ?? false)
     : incoming.messagesLoaded
+  const activeBranchId = shouldPreserveGraph
+    ? (currentSession?.activeBranchId ?? incoming.activeBranchId)
+    : incoming.activeBranchId
+  const branches = shouldPreserveGraph ? (currentSession?.branches ?? []) : incoming.branches
+  const messageNodes = shouldPreserveGraph
+    ? (currentSession?.messageNodes ?? {})
+    : incoming.messageNodes
 
-  return {
+  return buildSessionGraph({
     ...currentSession,
     ...incoming,
-    messages,
+    activeBranchId,
+    branches,
+    messageNodes,
     messagesLoaded,
-    lastCallInfo: getLastCallInfo(messages)
-  }
+    messages: shouldPreserveGraph ? (currentSession?.messages ?? []) : incoming.messages
+  })
 }
 
 function upsertSessions(current: ChatSession[], incoming: ChatSession | ChatSession[]) {
@@ -98,15 +128,229 @@ function upsertSessions(current: ChatSession[], incoming: ChatSession | ChatSess
   return next
 }
 
+function getSessionPendingEdits(
+  pendingEditsBySession: PendingEditsBySession,
+  sessionId: string | null
+) {
+  if (!sessionId) {
+    return {}
+  }
+
+  return pendingEditsBySession[sessionId] ?? {}
+}
+
+function getBranchAssistantPreviewSelections(
+  previewsBySession: AssistantPreviewSelectionsBySession,
+  sessionId: string | null,
+  branchId: string | null
+) {
+  if (!sessionId || !branchId) {
+    return {}
+  }
+
+  return previewsBySession[sessionId]?.[branchId] ?? {}
+}
+
+function applyAssistantVariantPreviews(
+  messages: ChatMessage[],
+  messageNodes: Record<string, ChatMessage>,
+  previewSelections: Record<string, string>,
+  activeHeadMessageId: string | null
+) {
+  return messages.map((message) => {
+    if (message.role !== 'assistant' || !message.parentId || message.id === activeHeadMessageId) {
+      return message
+    }
+
+    const previewMessageId = previewSelections[message.parentId]
+    if (!previewMessageId || previewMessageId === message.id) {
+      return message
+    }
+
+    const previewMessage = messageNodes[previewMessageId]
+    if (!previewMessage || previewMessage.role !== 'assistant' || previewMessage.parentId !== message.parentId) {
+      return message
+    }
+
+    return previewMessage
+  })
+}
+
+function getActivePathAssistantMessageIdForParent(session: ChatSession, parentId: string) {
+  return (
+    session.messages.find(
+      (message) => message.role === 'assistant' && message.parentId === parentId
+    )?.id ?? null
+  )
+}
+
+function isLeafAssistantGroup(session: ChatSession, messageId: string) {
+  const targetMessage = session.messageNodes[messageId]
+  if (!targetMessage || targetMessage.role !== 'assistant' || !targetMessage.parentId) {
+    return false
+  }
+
+  const headMessageId = session.activeBranch?.headMessageId
+  if (!headMessageId) {
+    return false
+  }
+
+  const headMessage = session.messageNodes[headMessageId]
+  return headMessage?.role === 'assistant' && headMessage.parentId === targetMessage.parentId
+}
+
+function findLatestAssistantSibling(
+  messageNodes: Record<string, ChatMessage>,
+  parentId: string
+) {
+  const siblings = Object.values(messageNodes).filter(
+    (message) => message.role === 'assistant' && message.parentId === parentId && !message.archived
+  )
+  if (siblings.length === 0) {
+    return null
+  }
+
+  return [...siblings].sort((left, right) => {
+    if (left.timestamp !== right.timestamp) {
+      return right.timestamp - left.timestamp
+    }
+    return right.id.localeCompare(left.id)
+  })[0] ?? null
+}
+
+function applyPendingEditsToMessages(
+  messages: ChatMessage[],
+  pendingEdits: Record<string, string>
+): ChatMessage[] {
+  return messages.map((message) => {
+    const pendingContent = pendingEdits[message.id]
+    if (pendingContent === undefined) {
+      if (!message.pendingEdit && message.originalContent === undefined) {
+        return message
+      }
+
+      return {
+        ...message,
+        pendingEdit: false,
+        originalContent: null
+      }
+    }
+
+    return {
+      ...message,
+      content: pendingContent,
+      pendingEdit: true,
+      originalContent: message.content
+    }
+  })
+}
+
+function buildModifiedNodesPayload(pendingEdits: Record<string, string>) {
+  return Object.entries(pendingEdits).map(([id, content]) => ({
+    id,
+    content
+  }))
+}
+
+function setBranchAssistantPreviewSelection(
+  current: AssistantPreviewSelectionsBySession,
+  sessionId: string,
+  branchId: string,
+  parentId: string,
+  messageId: string | null
+) {
+  const currentSessionSelections = current[sessionId] ?? {}
+  const currentBranchSelections = currentSessionSelections[branchId] ?? {}
+
+  if (messageId === null) {
+    if (!(parentId in currentBranchSelections)) {
+      return current
+    }
+
+    const nextBranchSelections = { ...currentBranchSelections }
+    delete nextBranchSelections[parentId]
+
+    if (Object.keys(nextBranchSelections).length === 0) {
+      const nextSessionSelections = { ...currentSessionSelections }
+      delete nextSessionSelections[branchId]
+
+      if (Object.keys(nextSessionSelections).length === 0) {
+        const next = { ...current }
+        delete next[sessionId]
+        return next
+      }
+
+      return {
+        ...current,
+        [sessionId]: nextSessionSelections
+      }
+    }
+
+    return {
+      ...current,
+      [sessionId]: {
+        ...currentSessionSelections,
+        [branchId]: nextBranchSelections
+      }
+    }
+  }
+
+  return {
+    ...current,
+    [sessionId]: {
+      ...currentSessionSelections,
+      [branchId]: {
+        ...currentBranchSelections,
+        [parentId]: messageId
+      }
+    }
+  }
+}
+
 export function useChatSession(enabled = true): UseChatSessionResult {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
+  const [assistantPreviewSelectionsBySession, setAssistantPreviewSelectionsBySession] =
+    useState<AssistantPreviewSelectionsBySession>({})
+  const [pendingEditsBySession, setPendingEditsBySession] = useState<PendingEditsBySession>({})
   const [sendingSessionId, setSendingSessionId] = useState<string | null>(null)
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
     [activeSessionId, sessions]
+  )
+  const pendingEdits = useMemo(
+    () => getSessionPendingEdits(pendingEditsBySession, activeSessionId),
+    [activeSessionId, pendingEditsBySession]
+  )
+  const assistantPreviewSelections = useMemo(
+    () =>
+      getBranchAssistantPreviewSelections(
+        assistantPreviewSelectionsBySession,
+        activeSessionId,
+        activeSession?.activeBranchId ?? null
+      ),
+    [activeSession?.activeBranchId, activeSessionId, assistantPreviewSelectionsBySession]
+  )
+  const previewedMessages = useMemo(
+    () =>
+      applyAssistantVariantPreviews(
+        activeSession?.messages ?? [],
+        activeSession?.messageNodes ?? {},
+        assistantPreviewSelections,
+        activeSession?.activeBranch?.headMessageId ?? null
+      ),
+    [
+      activeSession?.activeBranch?.headMessageId,
+      activeSession?.messageNodes,
+      activeSession?.messages,
+      assistantPreviewSelections
+    ]
+  )
+  const messages = useMemo(
+    () => applyPendingEditsToMessages(previewedMessages, pendingEdits),
+    [pendingEdits, previewedMessages]
   )
 
   const loadConversationDetail = useCallback(async (conversationId: string) => {
@@ -120,6 +364,8 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     if (!enabled) {
       setSessions([])
       setActiveSessionId(null)
+      setAssistantPreviewSelectionsBySession({})
+      setPendingEditsBySession({})
       setInitializing(false)
       return
     }
@@ -191,6 +437,24 @@ export function useChatSession(enabled = true): UseChatSessionResult {
 
     const remaining = sessions.filter((session) => session.id !== sessionId)
     setSessions(remaining)
+    setAssistantPreviewSelectionsBySession((current) => {
+      if (!(sessionId in current)) {
+        return current
+      }
+
+      const next = { ...current }
+      delete next[sessionId]
+      return next
+    })
+    setPendingEditsBySession((current) => {
+      if (!(sessionId in current)) {
+        return current
+      }
+
+      const next = { ...current }
+      delete next[sessionId]
+      return next
+    })
 
     if (activeSessionId !== sessionId) {
       return
@@ -267,6 +531,209 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     setSessions((current) => upsertSessions(current, updated))
   }
 
+  function setPendingEdit(messageId: string, content: string) {
+    if (!activeSessionId || !activeSession) {
+      return
+    }
+
+    const originalContent =
+      activeSession.messageNodes[messageId]?.content ??
+      activeSession.messages.find((message) => message.id === messageId)?.content
+
+    if (originalContent === undefined) {
+      return
+    }
+
+    setPendingEditsBySession((current) => {
+      const currentSessionEdits = current[activeSessionId] ?? {}
+      if (content === originalContent) {
+        if (!(messageId in currentSessionEdits)) {
+          return current
+        }
+
+        const nextSessionEdits = { ...currentSessionEdits }
+        delete nextSessionEdits[messageId]
+
+        if (Object.keys(nextSessionEdits).length === 0) {
+          const next = { ...current }
+          delete next[activeSessionId]
+          return next
+        }
+
+        return {
+          ...current,
+          [activeSessionId]: nextSessionEdits
+        }
+      }
+
+      return {
+        ...current,
+        [activeSessionId]: {
+          ...currentSessionEdits,
+          [messageId]: content
+        }
+      }
+    })
+  }
+
+  function clearPendingEdit(messageId: string) {
+    if (!activeSessionId) {
+      return
+    }
+
+    setPendingEditsBySession((current) => {
+      const currentSessionEdits = current[activeSessionId]
+      if (!currentSessionEdits || !(messageId in currentSessionEdits)) {
+        return current
+      }
+
+      const nextSessionEdits = { ...currentSessionEdits }
+      delete nextSessionEdits[messageId]
+
+      if (Object.keys(nextSessionEdits).length === 0) {
+        const next = { ...current }
+        delete next[activeSessionId]
+        return next
+      }
+
+      return {
+        ...current,
+        [activeSessionId]: nextSessionEdits
+      }
+    })
+  }
+
+  async function createBranch(baseMessageId: string, name?: string) {
+    if (!activeSessionId || sendingSessionId) {
+      return
+    }
+
+    const payload = await createConversationBranch(activeSessionId, {
+      baseMessageId,
+      name
+    })
+    const updated = normalizeChatSession(payload)
+    setSessions((current) => upsertSessions(current, updated))
+  }
+
+  async function selectBranch(branchId: string) {
+    if (!activeSessionId || sendingSessionId) {
+      return
+    }
+
+    const payload = await activateConversationBranch(activeSessionId, branchId)
+    const updated = normalizeChatSession(payload)
+    setSessions((current) => upsertSessions(current, updated))
+  }
+
+  async function toggleMessagePin(messageId: string, pinned: boolean) {
+    if (!activeSessionId || sendingSessionId) {
+      return
+    }
+
+    const payload = await updateConversationMessagePin(activeSessionId, messageId, pinned)
+    const updated = normalizeChatSession(payload)
+    setSessions((current) => upsertSessions(current, updated))
+  }
+
+  async function regenerateAssistantMessage(messageId: string, config: ChatConfig) {
+    if (!activeSessionId || sendingSessionId || !activeSession) {
+      return
+    }
+
+    const targetMessage = activeSession.messageNodes[messageId]
+    if (!targetMessage || targetMessage.role !== 'assistant' || !targetMessage.parentId) {
+      return
+    }
+
+    const activeBranchId = activeSession.activeBranchId
+    const leafAssistantGroup = isLeafAssistantGroup(activeSession, messageId)
+    const modifiedNodes = buildModifiedNodesPayload(pendingEdits)
+    setSendingSessionId(activeSessionId)
+
+    try {
+      const payload = await regenerateConversationMessage(activeSessionId, messageId, {
+        draftConfig: config,
+        modifiedNodes
+      })
+      const updated = normalizeChatSession(payload)
+      setSessions((current) => upsertSessions(current, updated))
+      if (!leafAssistantGroup && activeBranchId) {
+        const newestSibling = findLatestAssistantSibling(updated.messageNodes, targetMessage.parentId)
+        if (newestSibling) {
+          setAssistantPreviewSelectionsBySession((current) =>
+            setBranchAssistantPreviewSelection(
+              current,
+              activeSessionId,
+              activeBranchId,
+              targetMessage.parentId!,
+              newestSibling.id
+            )
+          )
+        }
+      }
+      if (modifiedNodes.length > 0) {
+        setPendingEditsBySession((current) => {
+          if (!(activeSessionId in current)) {
+            return current
+          }
+
+          const next = { ...current }
+          delete next[activeSessionId]
+          return next
+        })
+      }
+    } finally {
+      setSendingSessionId((current) => (current === activeSessionId ? null : current))
+    }
+  }
+
+  async function selectAssistantMessage(messageId: string) {
+    if (!activeSessionId || !activeSession) {
+      return
+    }
+
+    const targetMessage = activeSession.messageNodes[messageId]
+    if (!targetMessage || targetMessage.role !== 'assistant' || !targetMessage.parentId) {
+      return
+    }
+
+    const activeBranchId = activeSession.activeBranchId
+    if (!activeBranchId) {
+      return
+    }
+
+    if (!isLeafAssistantGroup(activeSession, messageId)) {
+      const activePathMessageId = getActivePathAssistantMessageIdForParent(
+        activeSession,
+        targetMessage.parentId
+      )
+      setAssistantPreviewSelectionsBySession((current) =>
+        setBranchAssistantPreviewSelection(
+          current,
+          activeSessionId,
+          activeBranchId,
+          targetMessage.parentId!,
+          activePathMessageId === messageId ? null : messageId
+        )
+      )
+      return
+    }
+
+    const payload = await selectConversationMessage(activeSessionId, messageId)
+    const updated = normalizeChatSession(payload)
+    setSessions((current) => upsertSessions(current, updated))
+    setAssistantPreviewSelectionsBySession((current) =>
+      setBranchAssistantPreviewSelection(
+        current,
+        activeSessionId,
+        activeBranchId,
+        targetMessage.parentId!,
+        null
+      )
+    )
+  }
+
   async function sendChat(content: string, config: ChatConfig) {
     if (!activeSessionId || sendingSessionId) {
       return
@@ -276,6 +743,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     if (!normalizedContent) {
       return
     }
+    const modifiedNodes = buildModifiedNodesPayload(pendingEdits)
 
     const startedAt = Date.now()
     const userMessage: ChatMessage = {
@@ -284,6 +752,11 @@ export function useChatSession(enabled = true): UseChatSessionResult {
       content: normalizedContent,
       timestamp: startedAt,
       status: 'completed',
+      parentId: null,
+      modifiedFrom: null,
+      pinned: false,
+      archived: false,
+      stale: false,
       callInfo: null
     }
     const assistantPlaceholder: ChatMessage = {
@@ -293,35 +766,46 @@ export function useChatSession(enabled = true): UseChatSessionResult {
       timestamp: startedAt,
       status: 'pending',
       loading: true,
+      parentId: userMessage.id,
+      modifiedFrom: null,
+      pinned: false,
+      archived: false,
+      stale: false,
       callInfo: null
     }
 
     setSessions((current) =>
       current.map((session) =>
-        session.id === activeSessionId
-          ? {
-              ...session,
-              draftConfig: config,
-              messagesLoaded: true,
-              messages: [...session.messages, userMessage, assistantPlaceholder],
-              messageCount: session.messageCount + 2,
-              lastMessagePreview: normalizedContent,
-              lastMessageRole: 'user',
-              lastMessageAt: startedAt,
-              updatedAt: startedAt
-            }
-          : session
+        session.id === activeSessionId ? appendOptimisticMessages(session, config, userMessage, assistantPlaceholder, startedAt) : session
       )
     )
     setSendingSessionId(activeSessionId)
 
     try {
-      const payload = await sendConversationMessage(activeSessionId, {
-        content: normalizedContent,
-        draftConfig: config
-      })
+      const payload =
+        modifiedNodes.length > 0
+          ? await sendConversationMessageWithEdits(activeSessionId, {
+              content: normalizedContent,
+              draftConfig: config,
+              modifiedNodes
+            })
+          : await sendConversationMessage(activeSessionId, {
+              content: normalizedContent,
+              draftConfig: config
+            })
       const updated = normalizeChatSession(payload)
       setSessions((current) => upsertSessions(current, updated))
+      if (modifiedNodes.length > 0) {
+        setPendingEditsBySession((current) => {
+          if (!(activeSessionId in current)) {
+            return current
+          }
+
+          const next = { ...current }
+          delete next[activeSessionId]
+          return next
+        })
+      }
     } catch (error) {
       const detail = error instanceof Error ? error.message : '未知错误'
       const errorCallInfo = buildErrorCallInfo(config.strategy, Date.now() - startedAt)
@@ -329,26 +813,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
       setSessions((current) =>
         current.map((session) =>
           session.id === activeSessionId
-            ? {
-                ...session,
-                lastMessagePreview: `调用失败：${detail}`,
-                lastMessageRole: 'assistant',
-                lastMessageAt: Date.now(),
-                updatedAt: Date.now(),
-                messages: session.messages.map((message) =>
-                  message.id === assistantPlaceholder.id
-                    ? {
-                        ...message,
-                        content: `调用失败：${detail}`,
-                        status: 'error',
-                        loading: false,
-                        errorMessage: detail,
-                        callInfo: errorCallInfo
-                      }
-                    : message
-                ),
-                lastCallInfo: errorCallInfo
-              }
+            ? applyOptimisticError(session, assistantPlaceholder.id, detail, errorCallInfo)
             : session
         )
       )
@@ -360,16 +825,128 @@ export function useChatSession(enabled = true): UseChatSessionResult {
   return {
     activeSession,
     activeSessionId,
+    clearPendingEdit,
+    createBranch,
     createSession,
     deleteSession,
     initializing,
     lastCallInfo: activeSession?.lastCallInfo ?? null,
-    messages: activeSession?.messages ?? [],
+    messages,
+    pendingEditCount: Object.keys(pendingEdits).length,
+    pendingEdits,
+    regenerateAssistantMessage,
     renameSession,
     saveDraftConfig,
+    selectAssistantMessage,
+    selectBranch,
     selectSession,
+    setPendingEdit,
     sendChat,
     sessions,
-    sending: sendingSessionId !== null
+    sending: sendingSessionId !== null,
+    toggleMessagePin
   }
+}
+
+function ensureActiveBranch(session: ChatSession): ChatBranch {
+  const activeBranch = getActiveChatBranch(session.branches, session.activeBranchId)
+  if (activeBranch) {
+    return activeBranch
+  }
+
+  return {
+    id: `branch-${session.id}`,
+    name: 'main',
+    headMessageId: null,
+    baseMessageId: null
+  }
+}
+
+function appendOptimisticMessages(
+  session: ChatSession,
+  config: ChatConfig,
+  userMessage: ChatMessage,
+  assistantPlaceholder: ChatMessage,
+  startedAt: number
+) {
+  const activeBranch = ensureActiveBranch(session)
+  const userNode = {
+    ...userMessage,
+    parentId: activeBranch.headMessageId
+  }
+  const nextBranches = (
+    session.branches.length > 0 ? session.branches : [activeBranch]
+  ).map((branch) =>
+    branch.id === activeBranch.id
+      ? {
+          ...branch,
+          baseMessageId: branch.baseMessageId ?? userNode.id,
+          headMessageId: assistantPlaceholder.id
+        }
+      : branch
+  )
+  const nextMessageNodes = {
+    ...session.messageNodes,
+    [userNode.id]: userNode,
+    [assistantPlaceholder.id]: {
+      ...assistantPlaceholder,
+      parentId: userNode.id
+    }
+  }
+
+  return buildSessionGraph({
+    ...session,
+    activeBranchId: activeBranch.id,
+    branches: nextBranches,
+    draftConfig: config,
+    messageNodes: nextMessageNodes,
+    messagesLoaded: true,
+    messageCount: session.messageCount + 2,
+    lastMessagePreview: normalizedContentPreview(userNode.content),
+    lastMessageRole: 'user',
+    lastMessageAt: startedAt,
+    updatedAt: startedAt
+  })
+}
+
+function applyOptimisticError(
+  session: ChatSession,
+  assistantMessageId: string,
+  detail: string,
+  errorCallInfo: ChatCallInfo
+) {
+  const failedAt = Date.now()
+  const assistantMessage = session.messageNodes[assistantMessageId]
+  if (!assistantMessage) {
+    return session
+  }
+
+  return buildSessionGraph({
+    ...session,
+    messageNodes: {
+      ...session.messageNodes,
+      [assistantMessageId]: {
+        ...assistantMessage,
+        content: `调用失败：${detail}`,
+        status: 'error',
+        loading: false,
+        errorMessage: detail,
+        callInfo: errorCallInfo,
+        timestamp: failedAt
+      }
+    },
+    lastMessagePreview: `调用失败：${detail}`,
+    lastMessageRole: 'assistant',
+    lastMessageAt: failedAt,
+    updatedAt: failedAt
+  })
+}
+
+function normalizedContentPreview(content: string) {
+  const normalized = content.trim().replace(/\s+/g, ' ')
+  if (normalized.length <= 120) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, 120)}…`
 }

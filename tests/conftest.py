@@ -20,7 +20,7 @@ get_settings.cache_clear()
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.main import app
-from app.models.chat_session import ChatConversation, ChatMessageRecord
+from app.models.chat_session import ChatBranch, ChatConversation, ChatMessageRecord
 from app.models.endpoint import ModelEndpoint
 from app.models.prompt import PromptTemplate
 from app.models.request_log import RequestLog
@@ -33,6 +33,7 @@ Base.metadata.create_all(bind=engine)
 def clean_state():
     with SessionLocal() as db:
         db.query(ChatMessageRecord).delete()
+        db.query(ChatBranch).delete()
         db.query(ChatConversation).delete()
         db.query(RequestLog).delete()
         db.query(PromptTemplate).delete()

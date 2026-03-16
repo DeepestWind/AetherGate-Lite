@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -21,12 +21,34 @@ class ChatConversation(TimestampMixin, Base):
     last_message_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
     message_count: Mapped[int] = mapped_column(Integer, default=0)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active_branch_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     messages: Mapped[list["ChatMessageRecord"]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
         order_by="ChatMessageRecord.seq",
     )
+    branches: Mapped[list["ChatBranch"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="ChatBranch.created_at",
+    )
+
+
+class ChatBranch(TimestampMixin, Base):
+    __tablename__ = "chat_branches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    branch_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    conversation_db_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(80), default="main")
+    head_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    base_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+    conversation: Mapped[ChatConversation] = relationship(back_populates="branches")
 
 
 class ChatMessageRecord(TimestampMixin, Base):
@@ -41,6 +63,11 @@ class ChatMessageRecord(TimestampMixin, Base):
     seq: Mapped[int] = mapped_column(Integer)
     role: Mapped[str] = mapped_column(String(16), index=True)
     content_text: Mapped[str] = mapped_column(Text, default="")
+    parent_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    modified_from_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    stale: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     status: Mapped[str] = mapped_column(String(20), default="completed", index=True)
     strategy: Mapped[str | None] = mapped_column(String(50), nullable=True)
     request_log_id: Mapped[int | None] = mapped_column(

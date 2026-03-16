@@ -7,6 +7,21 @@ import { render } from '@/testing/render'
 
 function buildSession(overrides: Partial<ChatSession>): ChatSession {
   return {
+    activeBranch: overrides.activeBranch ?? {
+      id: 'branch_main',
+      name: 'main',
+      headMessageId: null,
+      baseMessageId: null
+    },
+    activeBranchId: overrides.activeBranchId ?? 'branch_main',
+    branches: overrides.branches ?? [
+      {
+        id: 'branch_main',
+        name: 'main',
+        headMessageId: null,
+        baseMessageId: null
+      }
+    ],
     id: overrides.id ?? 'conv_1',
     title: overrides.title ?? '会话标题',
     draftConfig: overrides.draftConfig ?? {
@@ -23,6 +38,7 @@ function buildSession(overrides: Partial<ChatSession>): ChatSession {
     createdAt: overrides.createdAt ?? Date.now(),
     updatedAt: overrides.updatedAt ?? Date.now(),
     messages: overrides.messages ?? [],
+    messageNodes: overrides.messageNodes ?? {},
     messagesLoaded: overrides.messagesLoaded ?? true,
     lastCallInfo: overrides.lastCallInfo ?? null
   }

@@ -1,16 +1,23 @@
 import dayjs from 'dayjs'
-import { Copy, GitBranch, Pencil, Pin, Zap } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronLeft, ChevronRight, Copy, GitBranch, Pencil, Pin, RotateCcw, Zap } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { cn } from '@/shared/lib/cn'
+import { Button } from '@/shared/ui/button'
+import { Textarea } from '@/shared/ui/textarea'
 
 type MessageBubbleProps = {
-  isPinned: boolean
   message: ChatMessage
+  nextSiblingId: string | null
   onBranchMessage: (message: ChatMessage) => void | Promise<void>
-  onEditMessage: (message: ChatMessage) => void
+  onEditMessage: (message: ChatMessage, content: string) => void
+  onRegenerateMessage: (message: ChatMessage) => void | Promise<void>
+  onSelectSiblingMessage: (messageId: string) => void | Promise<void>
   onTogglePinMessage: (message: ChatMessage) => void
+  previousSiblingId: string | null
+  siblingCount: number
+  siblingIndex: number
 }
 
 function formatLatency(callInfo: ChatMessage['callInfo']) {
@@ -68,16 +75,37 @@ function MessageActionButton({
 }
 
 export function MessageBubble({
-  isPinned,
   message,
+  nextSiblingId,
   onBranchMessage,
   onEditMessage,
+  onRegenerateMessage,
+  onSelectSiblingMessage,
+  previousSiblingId,
+  siblingCount,
+  siblingIndex,
   onTogglePinMessage
 }: MessageBubbleProps) {
-  const { callInfo, content, loading, role, timestamp } = message
+  const { archived, callInfo, content, loading, modifiedFrom, pinned, role, stale, timestamp } =
+    message
   const isUser = role === 'user'
-  const canToggleCallInfo = !isUser && !loading && Boolean(callInfo)
+  const isSummary = role === 'summary'
+  const canToggleCallInfo = role === 'assistant' && !loading && Boolean(callInfo)
+  const canRegenerate = role === 'assistant' && !loading
+  const canBranch = role === 'assistant' && !loading
+  const canEdit = !isSummary && !loading
+  const canPin = !isSummary && !loading
+  const hasSiblingPager = role === 'assistant' && siblingCount > 1
   const [callInfoOpen, setCallInfoOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draftContent, setDraftContent] = useState(content)
+  const canSaveEdit = draftContent.trim().length > 0
+
+  useEffect(() => {
+    if (!editing) {
+      setDraftContent(content)
+    }
+  }, [content, editing])
 
   const handleCopy = async () => {
     try {
@@ -96,6 +124,23 @@ export function MessageBubble({
     setCallInfoOpen((current) => !current)
   }
 
+  const handleSaveEdit = () => {
+    if (!canSaveEdit) {
+      return
+    }
+
+    onEditMessage(message, draftContent)
+    setEditing(false)
+  }
+
+  const handleSelectSibling = async (siblingId: string | null) => {
+    if (!siblingId) {
+      return
+    }
+
+    await onSelectSiblingMessage(siblingId)
+  }
+
   return (
     <div className={cn('group flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
@@ -103,14 +148,20 @@ export function MessageBubble({
       >
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground-soft">{isUser ? '你' : '助手'}</span>
+            <span className="font-medium text-foreground-soft">
+              {isUser ? '你' : isSummary ? '摘要' : '助手'}
+            </span>
             <span>{dayjs(timestamp).format('HH:mm')}</span>
-            {isPinned ? (
+            {pinned ? (
               <span className="inline-flex items-center gap-1 text-accent" title="已标记">
                 <Pin className="size-3" />
                 已标记
               </span>
             ) : null}
+            {message.pendingEdit ? <span className="text-warning">未提交修改</span> : null}
+            {modifiedFrom ? <span className="text-warning">已改写</span> : null}
+            {stale ? <span className="text-warning">旧分支</span> : null}
+            {archived ? <span>已归档</span> : null}
             {!isUser && callInfo?.cacheHit ? (
               <span className="inline-flex items-center gap-1 text-success">
                 <Zap className="size-3" />
@@ -124,10 +175,49 @@ export function MessageBubble({
               'relative text-sm leading-7',
               isUser
                 ? 'w-fit max-w-[min(78%,680px)] rounded-[22px] rounded-br-md bg-accent-soft px-4 py-3 text-left text-foreground'
-                : 'w-full max-w-[760px] rounded-[18px] px-1 py-0.5 text-foreground'
+                : isSummary
+                  ? 'w-full max-w-[760px] rounded-[18px] border border-border bg-panel px-4 py-3 text-foreground'
+                  : 'w-full max-w-[760px] rounded-[18px] px-1 py-0.5 text-foreground',
+              archived && 'opacity-60',
+              stale && 'text-muted-foreground'
             )}
           >
-            {loading ? (
+            {editing ? (
+              <div className="space-y-3 rounded-[18px] border border-border bg-panel px-3 py-3">
+                <Textarea
+                  value={draftContent}
+                  onChange={(event) => setDraftContent(event.target.value)}
+                  className="min-h-[120px] resize-y border-border bg-background text-[14px] leading-6"
+                />
+
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {message.pendingEdit && message.originalContent ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setDraftContent(message.originalContent ?? '')}
+                    >
+                      恢复原文
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setDraftContent(content)
+                      setEditing(false)
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button type="button" size="sm" onClick={handleSaveEdit} disabled={!canSaveEdit}>
+                    保存修改
+                  </Button>
+                </div>
+              </div>
+            ) : loading ? (
               <div className="flex min-h-8 items-center gap-2 px-3">
                 <span className="size-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.2s]" />
                 <span className="size-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.1s]" />
@@ -137,9 +227,35 @@ export function MessageBubble({
               <div className="whitespace-pre-wrap break-words">{content}</div>
             )}
           </div>
+
+          {!editing && hasSiblingPager ? (
+            <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
+              <button
+                type="button"
+                aria-label="上一条回复"
+                className="inline-flex size-6 items-center justify-center rounded-full transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => void handleSelectSibling(previousSiblingId)}
+                disabled={!previousSiblingId}
+              >
+                <ChevronLeft className="size-3.5" />
+              </button>
+              <span className="min-w-12 text-center tabular-nums">
+                {siblingIndex + 1} / {siblingCount}
+              </span>
+              <button
+                type="button"
+                aria-label="下一条回复"
+                className="inline-flex size-6 items-center justify-center rounded-full transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => void handleSelectSibling(nextSiblingId)}
+                disabled={!nextSiblingId}
+              >
+                <ChevronRight className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
         </div>
 
-        {!loading ? (
+        {!loading && !editing ? (
           canToggleCallInfo ? (
             <div
               className={cn(
@@ -150,21 +266,34 @@ export function MessageBubble({
             >
               <div className="flex items-center gap-1">
                 <MessageActionButton ariaLabel="复制消息" icon={Copy} onClick={handleCopy} />
-                <MessageActionButton
-                  ariaLabel={isPinned ? '取消标记消息' : '标记消息'}
-                  icon={Pin}
-                  onClick={() => onTogglePinMessage(message)}
-                />
-                <MessageActionButton
-                  ariaLabel="创建分支"
-                  icon={GitBranch}
-                  onClick={() => onBranchMessage(message)}
-                />
-                <MessageActionButton
-                  ariaLabel="编辑消息"
-                  icon={Pencil}
-                  onClick={() => onEditMessage(message)}
-                />
+                {canPin ? (
+                  <MessageActionButton
+                    ariaLabel={pinned ? '取消标记消息' : '标记消息'}
+                    icon={Pin}
+                    onClick={() => onTogglePinMessage(message)}
+                  />
+                ) : null}
+                {canRegenerate ? (
+                  <MessageActionButton
+                    ariaLabel="重新生成回复"
+                    icon={RotateCcw}
+                    onClick={() => onRegenerateMessage(message)}
+                  />
+                ) : null}
+                {canBranch ? (
+                  <MessageActionButton
+                    ariaLabel="创建分支"
+                    icon={GitBranch}
+                    onClick={() => onBranchMessage(message)}
+                  />
+                ) : null}
+                {canEdit ? (
+                  <MessageActionButton
+                    ariaLabel="编辑消息"
+                    icon={Pencil}
+                    onClick={() => setEditing(true)}
+                  />
+                ) : null}
               </div>
 
               <button
@@ -180,26 +309,39 @@ export function MessageBubble({
             <div
               className={cn(
                 'flex items-center gap-1 px-0.5 opacity-0 transition duration-150 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
-                isPinned && 'opacity-100 pointer-events-auto',
+                pinned && 'opacity-100 pointer-events-auto',
                 isUser ? 'justify-end' : 'justify-start'
               )}
             >
               <MessageActionButton ariaLabel="复制消息" icon={Copy} onClick={handleCopy} />
-              <MessageActionButton
-                ariaLabel={isPinned ? '取消标记消息' : '标记消息'}
-                icon={Pin}
-                onClick={() => onTogglePinMessage(message)}
-              />
-              <MessageActionButton
-                ariaLabel="创建分支"
-                icon={GitBranch}
-                onClick={() => onBranchMessage(message)}
-              />
-              <MessageActionButton
-                ariaLabel="编辑消息"
-                icon={Pencil}
-                onClick={() => onEditMessage(message)}
-              />
+              {canPin ? (
+                <MessageActionButton
+                  ariaLabel={pinned ? '取消标记消息' : '标记消息'}
+                  icon={Pin}
+                  onClick={() => onTogglePinMessage(message)}
+                />
+              ) : null}
+              {canRegenerate ? (
+                <MessageActionButton
+                  ariaLabel="重新生成回复"
+                  icon={RotateCcw}
+                  onClick={() => onRegenerateMessage(message)}
+                />
+              ) : null}
+              {canBranch ? (
+                <MessageActionButton
+                  ariaLabel="创建分支"
+                  icon={GitBranch}
+                  onClick={() => onBranchMessage(message)}
+                />
+              ) : null}
+              {canEdit ? (
+                <MessageActionButton
+                  ariaLabel="编辑消息"
+                  icon={Pencil}
+                  onClick={() => setEditing(true)}
+                />
+              ) : null}
             </div>
           )
         ) : null}

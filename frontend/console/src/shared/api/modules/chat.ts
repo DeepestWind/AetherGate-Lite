@@ -17,6 +17,11 @@ type ChatConversationConfigPayload = {
   variables: Record<string, string>
 }
 
+type ChatConversationMessageEditPayload = {
+  content: string
+  id: string
+}
+
 export async function sendChatMessage(payload: SendChatPayload) {
   const response = await apiClient.post<unknown>('/v1/chat/completions', {
     messages: payload.messages,
@@ -107,6 +112,104 @@ export async function sendConversationMessage(
         variables: payload.draftConfig.variables
       }
     }
+  )
+  return response.data
+}
+
+export async function sendConversationMessageWithEdits(
+  conversationId: string,
+  payload: {
+    content: string
+    draftConfig: ChatConversationConfigPayload
+    modifiedNodes: ChatConversationMessageEditPayload[]
+  }
+) {
+  const response = await apiClient.post<unknown>(
+    `/api/chat/conversations/${conversationId}/messages/commit`,
+    {
+      content: payload.content,
+      draft_config: {
+        model: payload.draftConfig.model,
+        prompt_id: payload.draftConfig.promptId,
+        strategy: payload.draftConfig.strategy,
+        temperature: payload.draftConfig.temperature,
+        variables: payload.draftConfig.variables
+      },
+      modified_nodes: payload.modifiedNodes.map((item) => ({
+        id: item.id,
+        content: item.content
+      }))
+    }
+  )
+  return response.data
+}
+
+export async function regenerateConversationMessage(
+  conversationId: string,
+  messageId: string,
+  payload: {
+    draftConfig: ChatConversationConfigPayload
+    modifiedNodes: ChatConversationMessageEditPayload[]
+  }
+) {
+  const response = await apiClient.post<unknown>(
+    `/api/chat/conversations/${conversationId}/messages/${messageId}/regenerate`,
+    {
+      draft_config: {
+        model: payload.draftConfig.model,
+        prompt_id: payload.draftConfig.promptId,
+        strategy: payload.draftConfig.strategy,
+        temperature: payload.draftConfig.temperature,
+        variables: payload.draftConfig.variables
+      },
+      modified_nodes: payload.modifiedNodes.map((item) => ({
+        id: item.id,
+        content: item.content
+      }))
+    }
+  )
+  return response.data
+}
+
+export async function selectConversationMessage(conversationId: string, messageId: string) {
+  const response = await apiClient.post<unknown>(
+    `/api/chat/conversations/${conversationId}/messages/${messageId}/select`
+  )
+  return response.data
+}
+
+export async function updateConversationMessagePin(
+  conversationId: string,
+  messageId: string,
+  pinned: boolean
+) {
+  const response = await apiClient.patch<unknown>(
+    `/api/chat/conversations/${conversationId}/messages/${messageId}/pin`,
+    { pinned }
+  )
+  return response.data
+}
+
+export async function createConversationBranch(
+  conversationId: string,
+  payload: {
+    baseMessageId: string
+    name?: string
+  }
+) {
+  const response = await apiClient.post<unknown>(
+    `/api/chat/conversations/${conversationId}/branches`,
+    {
+      base_message_id: payload.baseMessageId,
+      name: payload.name
+    }
+  )
+  return response.data
+}
+
+export async function activateConversationBranch(conversationId: string, branchId: string) {
+  const response = await apiClient.post<unknown>(
+    `/api/chat/conversations/${conversationId}/branches/${branchId}/activate`
   )
   return response.data
 }

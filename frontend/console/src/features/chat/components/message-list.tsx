@@ -1,28 +1,85 @@
 import { Sparkles } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { chatStarterPrompts } from '@/features/chat/chat-page-utils'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { MessageBubble } from './message-bubble'
 
 type MessageListProps = {
-  pinnedMessageIds: Set<string>
   messages: ChatMessage[]
+  messageNodes: Record<string, ChatMessage>
   onBranchMessage: (message: ChatMessage) => void | Promise<void>
-  onEditMessage: (message: ChatMessage) => void
+  onEditMessage: (message: ChatMessage, content: string) => void
+  onRegenerateMessage: (message: ChatMessage) => void | Promise<void>
+  onSelectSiblingMessage: (messageId: string) => void | Promise<void>
   onStarterPromptSelect: (prompt: string) => void
   onTogglePinMessage: (message: ChatMessage) => void
 }
 
+type AssistantSiblingMeta = {
+  index: number
+  nextId: string | null
+  previousId: string | null
+  total: number
+}
+
+function buildAssistantSiblingMeta(messageNodes: Record<string, ChatMessage>) {
+  const groups = new Map<string, ChatMessage[]>()
+
+  for (const message of Object.values(messageNodes)) {
+    if (message.role !== 'assistant' || message.archived) {
+      continue
+    }
+
+    const groupKey = message.parentId ?? '__root__'
+    const group = groups.get(groupKey)
+    if (group) {
+      group.push(message)
+      continue
+    }
+
+    groups.set(groupKey, [message])
+  }
+
+  const metadata: Record<string, AssistantSiblingMeta> = {}
+
+  for (const siblings of groups.values()) {
+    const orderedSiblings = [...siblings].sort((left, right) => {
+      if (left.timestamp !== right.timestamp) {
+        return left.timestamp - right.timestamp
+      }
+      return left.id.localeCompare(right.id)
+    })
+
+    if (orderedSiblings.length <= 1) {
+      continue
+    }
+
+    orderedSiblings.forEach((message, index) => {
+      metadata[message.id] = {
+        index,
+        previousId: orderedSiblings[index - 1]?.id ?? null,
+        nextId: orderedSiblings[index + 1]?.id ?? null,
+        total: orderedSiblings.length
+      }
+    })
+  }
+
+  return metadata
+}
+
 export function MessageList({
-  pinnedMessageIds,
   messages,
+  messageNodes,
   onBranchMessage,
   onEditMessage,
+  onRegenerateMessage,
+  onSelectSiblingMessage,
   onStarterPromptSelect,
   onTogglePinMessage
 }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const messageCount = messages.length
+  const siblingMeta = useMemo(() => buildAssistantSiblingMeta(messageNodes), [messageNodes])
 
   useEffect(() => {
     if (!listRef.current) {
@@ -69,10 +126,15 @@ export function MessageList({
           {messages.map((message) => (
             <MessageBubble
               key={message.id}
-              isPinned={pinnedMessageIds.has(message.id)}
               message={message}
               onBranchMessage={onBranchMessage}
               onEditMessage={onEditMessage}
+              onRegenerateMessage={onRegenerateMessage}
+              onSelectSiblingMessage={onSelectSiblingMessage}
+              siblingIndex={siblingMeta[message.id]?.index ?? 0}
+              siblingCount={siblingMeta[message.id]?.total ?? 1}
+              previousSiblingId={siblingMeta[message.id]?.previousId ?? null}
+              nextSiblingId={siblingMeta[message.id]?.nextId ?? null}
               onTogglePinMessage={onTogglePinMessage}
             />
           ))}
