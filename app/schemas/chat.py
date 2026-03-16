@@ -26,6 +26,7 @@ class ChatCompletionRequest(BaseModel):
     prompt_variables: dict[str, Any] = Field(default_factory=dict)
     strategy: Literal["designated", "balanced", "cheapest", "quality"] | None = None
     endpoint_id: int | None = None
+    disable_cache: bool = False
     stream: bool = False
 
 
@@ -65,4 +66,3 @@ class ModelDescriptor(BaseModel):
 class ModelsResponse(BaseModel):
     object: str = "list"
     data: list[ModelDescriptor]
-

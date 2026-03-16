@@ -241,3 +241,188 @@ def test_ensure_schema_compatibility_recovers_from_interrupted_endpoint_migratio
     assert row.priority == 90
     assert row.input_cost_per_1k == 0.4
     assert row.output_cost_per_1k == 0.5
+
+
+def test_ensure_schema_compatibility_backfills_chat_graph_columns_and_main_branch(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'chat-schema-compat.db'}")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE chat_conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id VARCHAR(64) NOT NULL,
+                    title VARCHAR(200) NOT NULL,
+                    title_source VARCHAR(20) NOT NULL,
+                    draft_config JSON NOT NULL,
+                    last_message_preview TEXT,
+                    last_message_role VARCHAR(16),
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    last_message_at DATETIME,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id VARCHAR(64) NOT NULL,
+                    conversation_db_id INTEGER NOT NULL,
+                    seq INTEGER NOT NULL,
+                    role VARCHAR(16) NOT NULL,
+                    content_text TEXT NOT NULL DEFAULT '',
+                    status VARCHAR(20) NOT NULL DEFAULT 'completed',
+                    strategy VARCHAR(50),
+                    request_log_id INTEGER,
+                    error_message TEXT,
+                    finish_reason VARCHAR(32),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO chat_conversations (
+                    id,
+                    conversation_id,
+                    title,
+                    title_source,
+                    draft_config,
+                    last_message_preview,
+                    last_message_role,
+                    message_count,
+                    last_message_at,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    1,
+                    'conv_legacy',
+                    '旧会话',
+                    'auto',
+                    '{}',
+                    NULL,
+                    NULL,
+                    2,
+                    NULL,
+                    '2026-03-11 00:00:00',
+                    '2026-03-11 00:00:00'
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO chat_messages (
+                    id,
+                    message_id,
+                    conversation_db_id,
+                    seq,
+                    role,
+                    content_text,
+                    status,
+                    strategy,
+                    request_log_id,
+                    error_message,
+                    finish_reason,
+                    created_at,
+                    updated_at
+                ) VALUES
+                    (
+                        1,
+                        'msg_legacy_user',
+                        1,
+                        1,
+                        'user',
+                        '你好',
+                        'completed',
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        '2026-03-11 00:00:00',
+                        '2026-03-11 00:00:00'
+                    ),
+                    (
+                        2,
+                        'msg_legacy_assistant',
+                        1,
+                        2,
+                        'assistant',
+                        '你好，有什么可以帮你？',
+                        'completed',
+                        NULL,
+                        NULL,
+                        NULL,
+                        'stop',
+                        '2026-03-11 00:00:01',
+                        '2026-03-11 00:00:01'
+                    )
+                """
+            )
+        )
+
+    ensure_schema_compatibility(engine)
+
+    inspector = inspect(engine)
+    conversation_columns = {column["name"] for column in inspector.get_columns("chat_conversations")}
+    message_columns = {column["name"] for column in inspector.get_columns("chat_messages")}
+    branch_columns = {column["name"] for column in inspector.get_columns("chat_branches")}
+
+    assert "active_branch_id" in conversation_columns
+    assert {"parent_message_id", "modified_from_message_id", "pinned", "archived", "stale"} <= message_columns
+    assert {"branch_id", "head_message_id", "base_message_id"} <= branch_columns
+
+    with engine.begin() as connection:
+        messages = connection.execute(
+            text(
+                """
+                SELECT
+                    message_id,
+                    parent_message_id
+                FROM chat_messages
+                WHERE conversation_db_id = 1
+                ORDER BY seq ASC
+                """
+            )
+        ).mappings().all()
+        conversation = connection.execute(
+            text(
+                """
+                SELECT
+                    active_branch_id
+                FROM chat_conversations
+                WHERE id = 1
+                """
+            )
+        ).mappings().one()
+        branch = connection.execute(
+            text(
+                """
+                SELECT
+                    branch_id,
+                    name,
+                    head_message_id,
+                    base_message_id
+                FROM chat_branches
+                WHERE conversation_db_id = 1
+                """
+            )
+        ).mappings().one()
+
+    assert messages == [
+        {"message_id": "msg_legacy_user", "parent_message_id": None},
+        {"message_id": "msg_legacy_assistant", "parent_message_id": "msg_legacy_user"},
+    ]
+    assert conversation["active_branch_id"] == branch["branch_id"]
+    assert branch["name"] == "main"
+    assert branch["head_message_id"] == "msg_legacy_assistant"
+    assert branch["base_message_id"] == "msg_legacy_user"

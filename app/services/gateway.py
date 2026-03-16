@@ -82,7 +82,8 @@ class GatewayService:
 
         prompt_id = prompt_template.prompt_id if prompt_template else request.prompt_id
         cache_key = self._build_cache_key(messages, request, strategy, temperature, prompt_id)
-        if temperature <= self.settings.cache_temperature_threshold:
+        cache_enabled = not request.disable_cache and temperature <= self.settings.cache_temperature_threshold
+        if cache_enabled:
             cached = self.cache.get(cache_key)
             if cached:
                 response = ChatCompletionResponse.model_validate(cached["response"])
@@ -191,7 +192,7 @@ class GatewayService:
                         timestamp=datetime.now(timezone.utc),
                     ),
                 )
-                if temperature <= self.settings.cache_temperature_threshold:
+                if cache_enabled:
                     self.cache.set(
                         cache_key,
                         {

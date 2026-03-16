@@ -278,6 +278,16 @@ def test_chat_conversation_persists_messages_and_config(client, auth_headers, mo
     conversation_id = created["id"]
     assert created["draft_config"] == draft_config
     assert created["messages"] == []
+    assert created["message_nodes"] == {}
+    assert created["active_branch_id"]
+    assert created["branches"] == [
+        {
+            "id": created["active_branch_id"],
+            "name": "main",
+            "head_message_id": None,
+            "base_message_id": None,
+        }
+    ]
 
     send_response = client.post(
         f"/api/chat/conversations/{conversation_id}/messages",
@@ -297,8 +307,20 @@ def test_chat_conversation_persists_messages_and_config(client, auth_headers, mo
     assert [message["role"] for message in sent["messages"]] == ["user", "assistant"]
     assert sent["messages"][0]["content"] == "帮我记住这条对话"
     assert sent["messages"][1]["content"] == "持久化测试回复"
+    assert sent["messages"][0]["parent_id"] is None
+    assert sent["messages"][1]["parent_id"] == sent["messages"][0]["id"]
     assert sent["messages"][1]["call_info"]["request_id"] != ""
     assert sent["messages"][1]["call_info"]["strategy"] == "balanced"
+    assert sent["branches"] == [
+        {
+            "id": sent["active_branch_id"],
+            "name": "main",
+            "head_message_id": sent["messages"][1]["id"],
+            "base_message_id": sent["messages"][0]["id"],
+        }
+    ]
+    assert set(sent["message_nodes"]) == {sent["messages"][0]["id"], sent["messages"][1]["id"]}
+    assert sent["message_nodes"][sent["messages"][1]["id"]]["parent_id"] == sent["messages"][0]["id"]
 
     list_response = client.get("/api/chat/conversations", headers=auth_headers)
     assert list_response.status_code == 200
@@ -307,6 +329,7 @@ def test_chat_conversation_persists_messages_and_config(client, auth_headers, mo
     assert listed[0]["id"] == conversation_id
     assert listed[0]["message_count"] == 2
     assert listed[0]["draft_config"] == draft_config
+    assert listed[0]["active_branch_id"] == sent["active_branch_id"]
 
     detail_response = client.get(f"/api/chat/conversations/{conversation_id}", headers=auth_headers)
     assert detail_response.status_code == 200
@@ -331,6 +354,733 @@ def test_chat_conversation_persists_messages_and_config(client, auth_headers, mo
     final_list_response = client.get("/api/chat/conversations", headers=auth_headers)
     assert final_list_response.status_code == 200
     assert final_list_response.json() == []
+
+
+def test_chat_conversation_commit_edits_updates_history_before_generation(
+    client, auth_headers, monkeypatch
+):
+    captured_calls = []
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        captured_calls.append([(message.role, message.content) for message in messages])
+        reply = "初始回复" if len(captured_calls) == 1 else "基于改写后的上下文继续回复"
+        return ProviderChatResult(
+            content=reply,
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-edit-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "原始问题",
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send_response.status_code == 200
+    first_payload = first_send_response.json()
+    original_user_id = first_payload["messages"][0]["id"]
+
+    second_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages/commit",
+        headers=auth_headers,
+        json={
+            "content": "继续分析",
+            "draft_config": draft_config,
+            "modified_nodes": [
+                {
+                    "id": original_user_id,
+                    "content": "改写后的问题"
+                }
+            ],
+        },
+    )
+    assert second_send_response.status_code == 200
+
+    second_payload = second_send_response.json()
+    assert second_payload["message_count"] == 4
+    assert [message["role"] for message in second_payload["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert second_payload["messages"][0]["content"] == "改写后的问题"
+    assert second_payload["message_nodes"][original_user_id]["content"] == "改写后的问题"
+    assert second_payload["messages"][2]["content"] == "继续分析"
+    assert second_payload["messages"][3]["content"] == "基于改写后的上下文继续回复"
+    assert captured_calls[-1] == [
+        ("user", "改写后的问题"),
+        ("assistant", "初始回复"),
+        ("user", "继续分析"),
+    ]
+
+
+def test_chat_conversation_regenerate_creates_assistant_sibling_and_moves_branch(
+    client, auth_headers, monkeypatch
+):
+    captured_calls = []
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        captured_calls.append([(message.role, message.content) for message in messages])
+        reply = "第一版回答" if len(captured_calls) == 1 else "重新生成后的回答"
+        return ProviderChatResult(
+            content=reply,
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-regenerate-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "解释这个概念",
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send_response.status_code == 200
+    first_payload = first_send_response.json()
+    original_user_id = first_payload["messages"][0]["id"]
+    original_assistant_id = first_payload["messages"][1]["id"]
+
+    regenerate_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages/{original_assistant_id}/regenerate",
+        headers=auth_headers,
+        json={"draft_config": draft_config, "modified_nodes": []},
+    )
+    assert regenerate_response.status_code == 200
+
+    regenerated_payload = regenerate_response.json()
+    assert regenerated_payload["message_count"] == 3
+    assert [message["role"] for message in regenerated_payload["messages"]] == ["user", "assistant"]
+    assert regenerated_payload["messages"][0]["id"] == original_user_id
+    assert regenerated_payload["messages"][0]["content"] == "解释这个概念"
+    assert regenerated_payload["messages"][1]["id"] != original_assistant_id
+    assert regenerated_payload["messages"][1]["content"] == "重新生成后的回答"
+    assert regenerated_payload["messages"][1]["parent_id"] == original_user_id
+    assert regenerated_payload["branches"] == [
+        {
+            "id": regenerated_payload["active_branch_id"],
+            "name": "main",
+            "head_message_id": regenerated_payload["messages"][1]["id"],
+            "base_message_id": original_user_id,
+        }
+    ]
+    assert set(regenerated_payload["message_nodes"]) == {
+        original_user_id,
+        original_assistant_id,
+        regenerated_payload["messages"][1]["id"],
+    }
+    assert regenerated_payload["message_nodes"][original_assistant_id]["content"] == "第一版回答"
+    assert regenerated_payload["message_nodes"][regenerated_payload["messages"][1]["id"]]["content"] == "重新生成后的回答"
+    assert captured_calls == [
+        [("user", "解释这个概念")],
+        [("user", "解释这个概念")],
+    ]
+
+
+def test_chat_conversation_can_select_assistant_variant_without_resetting_branch_head(
+    client, auth_headers, monkeypatch
+):
+    replies = iter(["第一版回答", "第二版回答"])
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        return ProviderChatResult(
+            content=next(replies),
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-select-variant-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "给我两个版本",
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send_response.status_code == 200
+    original_payload = first_send_response.json()
+    original_assistant_id = original_payload["messages"][1]["id"]
+
+    regenerate_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages/{original_assistant_id}/regenerate",
+        headers=auth_headers,
+        json={"draft_config": draft_config, "modified_nodes": []},
+    )
+    assert regenerate_response.status_code == 200
+    regenerated_payload = regenerate_response.json()
+    regenerated_assistant_id = regenerated_payload["messages"][1]["id"]
+
+    select_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages/{original_assistant_id}/select",
+        headers=auth_headers,
+    )
+    assert select_response.status_code == 200
+    selected_payload = select_response.json()
+    assert selected_payload["messages"][1]["id"] == original_assistant_id
+    assert selected_payload["messages"][1]["content"] == "第一版回答"
+    assert selected_payload["branches"] == [
+        {
+            "id": selected_payload["active_branch_id"],
+            "name": "main",
+            "head_message_id": original_assistant_id,
+            "base_message_id": selected_payload["messages"][0]["id"],
+        }
+    ]
+
+    detail_response = client.get(
+        f"/api/chat/conversations/{conversation_id}",
+        headers=auth_headers,
+    )
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["messages"][1]["id"] == original_assistant_id
+    assert detail_payload["messages"][1]["content"] == "第一版回答"
+    assert detail_payload["message_nodes"][regenerated_assistant_id]["content"] == "第二版回答"
+
+
+def test_chat_conversation_can_create_and_activate_branch_from_existing_node(
+    client, auth_headers, monkeypatch
+):
+    replies = iter(["第一版回答", "第二版回答"])
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        return ProviderChatResult(
+            content=next(replies),
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-branch-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第一条问题",
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send_response.status_code == 200
+    first_payload = first_send_response.json()
+    main_branch_id = first_payload["active_branch_id"]
+    first_user_id = first_payload["messages"][0]["id"]
+
+    second_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "继续追问",
+            "draft_config": draft_config,
+        },
+    )
+    assert second_send_response.status_code == 200
+    second_payload = second_send_response.json()
+    assert [message["content"] for message in second_payload["messages"]] == [
+        "第一条问题",
+        "第一版回答",
+        "继续追问",
+        "第二版回答",
+    ]
+
+    create_branch_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/branches",
+        headers=auth_headers,
+        json={"base_message_id": first_user_id},
+    )
+    assert create_branch_response.status_code == 200
+    branch_payload = create_branch_response.json()
+    assert branch_payload["active_branch_id"] != main_branch_id
+    assert [message["id"] for message in branch_payload["messages"]] == [first_user_id]
+    assert branch_payload["branches"] == [
+        {
+            "id": main_branch_id,
+            "name": "main",
+            "head_message_id": second_payload["messages"][3]["id"],
+            "base_message_id": first_user_id,
+        },
+        {
+            "id": branch_payload["active_branch_id"],
+            "name": "branch-2",
+            "head_message_id": first_user_id,
+            "base_message_id": first_user_id,
+        },
+    ]
+
+    activate_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/branches/{main_branch_id}/activate",
+        headers=auth_headers,
+    )
+    assert activate_response.status_code == 200
+    activated_payload = activate_response.json()
+    assert activated_payload["active_branch_id"] == main_branch_id
+    assert [message["content"] for message in activated_payload["messages"]] == [
+        "第一条问题",
+        "第一版回答",
+        "继续追问",
+        "第二版回答",
+    ]
+
+
+def test_chat_conversation_regenerate_non_leaf_assistant_keeps_active_path(
+    client, auth_headers, monkeypatch
+):
+    replies = iter(["第一版回答", "第二版回答", "历史回答新版本"])
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        return ProviderChatResult(
+            content=next(replies),
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-history-retry-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第一条问题",
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send_response.status_code == 200
+    first_payload = first_send_response.json()
+    first_assistant_id = first_payload["messages"][1]["id"]
+
+    second_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "继续追问",
+            "draft_config": draft_config,
+        },
+    )
+    assert second_send_response.status_code == 200
+    second_payload = second_send_response.json()
+    current_head_id = second_payload["messages"][3]["id"]
+
+    regenerate_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages/{first_assistant_id}/regenerate",
+        headers=auth_headers,
+        json={"draft_config": draft_config, "modified_nodes": []},
+    )
+    assert regenerate_response.status_code == 200
+    regenerated_payload = regenerate_response.json()
+
+    assert regenerated_payload["branches"] == [
+        {
+            "id": regenerated_payload["active_branch_id"],
+            "name": "main",
+            "head_message_id": current_head_id,
+            "base_message_id": second_payload["messages"][0]["id"],
+        }
+    ]
+    assert [message["content"] for message in regenerated_payload["messages"]] == [
+        "第一条问题",
+        "第一版回答",
+        "继续追问",
+        "第二版回答",
+    ]
+    new_history_siblings = [
+        message
+        for message in regenerated_payload["message_nodes"].values()
+        if message["parent_id"] == second_payload["messages"][0]["id"]
+        and message["role"] == "assistant"
+    ]
+    assert len(new_history_siblings) == 2
+    assert sorted(message["content"] for message in new_history_siblings) == [
+        "历史回答新版本",
+        "第一版回答",
+    ]
+
+
+def test_chat_conversation_compresses_context_with_summary_using_medium_default(
+    client, auth_headers, monkeypatch
+):
+    captured_calls = []
+    replies = iter(["第一轮回答" * 160, "第二轮回答" * 160, "第三轮回答" * 160])
+
+    def fake_approximate_tokens(text):
+        if not text:
+            return 0
+        if text.startswith("历史摘要"):
+            return 200
+        return len(text) * 50
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        captured_calls.append([(message.role, message.content) for message in messages])
+        return ProviderChatResult(
+            content=next(replies),
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr("app.services.chat_sessions.approximate_tokens", fake_approximate_tokens)
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-compression-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第一轮问题" * 160,
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send.status_code == 200
+
+    second_send = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第二轮问题" * 160,
+            "draft_config": draft_config,
+        },
+    )
+    assert second_send.status_code == 200
+    second_payload = second_send.json()
+    assert not any(node["role"] == "summary" for node in second_payload["message_nodes"].values())
+
+    third_send = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第三轮问题" * 160,
+            "draft_config": draft_config,
+        },
+    )
+    assert third_send.status_code == 200
+    third_payload = third_send.json()
+
+    summary_nodes = [
+        node for node in third_payload["message_nodes"].values() if node["role"] == "summary"
+    ]
+    assert len(summary_nodes) == 1
+    assert summary_nodes[0]["pinned"] is True
+    assert third_payload["messages"][1]["role"] == "summary"
+
+    archived_assistants = [
+        node
+        for node in third_payload["message_nodes"].values()
+        if node["role"] == "assistant" and node["archived"]
+    ]
+    assert len(archived_assistants) == 1
+    assert any(role == "system" for role, _ in captured_calls[-1])
+
+
+def test_chat_conversation_pinned_message_is_excluded_from_compression(
+    client, auth_headers, monkeypatch
+):
+    replies = iter(["第一轮回答" * 160, "第二轮回答" * 160, "第三轮回答" * 160])
+
+    def fake_approximate_tokens(text):
+        if not text:
+            return 0
+        if text.startswith("历史摘要"):
+            return 200
+        return len(text) * 50
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        return ProviderChatResult(
+            content=next(replies),
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr("app.services.chat_sessions.approximate_tokens", fake_approximate_tokens)
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-pin-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第一轮问题" * 160,
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send.status_code == 200
+    first_payload = first_send.json()
+    first_assistant_id = first_payload["messages"][1]["id"]
+
+    pin_response = client.patch(
+        f"/api/chat/conversations/{conversation_id}/messages/{first_assistant_id}/pin",
+        headers=auth_headers,
+        json={"pinned": True},
+    )
+    assert pin_response.status_code == 200
+    assert pin_response.json()["message_nodes"][first_assistant_id]["pinned"] is True
+
+    second_send = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第二轮问题" * 160,
+            "draft_config": draft_config,
+        },
+    )
+    assert second_send.status_code == 200
+
+    third_send = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "第三轮问题" * 160,
+            "draft_config": draft_config,
+        },
+    )
+    assert third_send.status_code == 200
+    third_payload = third_send.json()
+
+    assert not any(node["role"] == "summary" for node in third_payload["message_nodes"].values())
+    assert third_payload["message_nodes"][first_assistant_id]["pinned"] is True
+    assert third_payload["message_nodes"][first_assistant_id]["archived"] is False
+    assert [message["role"] for message in third_payload["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
 
 
 def test_chat_conversation_can_be_renamed(client, auth_headers):
