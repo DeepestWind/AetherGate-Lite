@@ -14,6 +14,11 @@ import {
   selectConversationMessage,
   sendConversationMessage,
   sendConversationMessageWithEdits,
+  stopConversationMessageGeneration,
+  streamConversationMessage,
+  streamConversationMessageWithEdits,
+  streamEditConversationMessageInBranch,
+  streamRegenerateConversationMessage,
   updateConversationMessagePin,
   updateChatConversationConfig
 } from '@/shared/api/modules/chat'
@@ -31,6 +36,11 @@ vi.mock('@/shared/api/modules/chat', () => ({
   selectConversationMessage: vi.fn(),
   sendConversationMessage: vi.fn(),
   sendConversationMessageWithEdits: vi.fn(),
+  stopConversationMessageGeneration: vi.fn(),
+  streamConversationMessage: vi.fn(),
+  streamConversationMessageWithEdits: vi.fn(),
+  streamEditConversationMessageInBranch: vi.fn(),
+  streamRegenerateConversationMessage: vi.fn(),
   updateConversationMessagePin: vi.fn(),
   updateChatConversationConfig: vi.fn()
 }))
@@ -394,6 +404,43 @@ describe('useChatSession', () => {
         }
       ]
     })
+    vi.mocked(stopConversationMessageGeneration).mockResolvedValue(undefined)
+    vi.mocked(streamConversationMessage).mockImplementation(
+      async (conversationId, payload, options) => {
+        const conversation = await sendConversationMessage(conversationId, payload)
+        options.onEvent({
+          kind: 'message.completed',
+          conversation
+        })
+      }
+    )
+    vi.mocked(streamConversationMessageWithEdits).mockImplementation(
+      async (conversationId, payload, options) => {
+        const conversation = await sendConversationMessageWithEdits(conversationId, payload)
+        options.onEvent({
+          kind: 'message.completed',
+          conversation
+        })
+      }
+    )
+    vi.mocked(streamEditConversationMessageInBranch).mockImplementation(
+      async (conversationId, messageId, payload, options) => {
+        const conversation = await editConversationMessageInBranch(conversationId, messageId, payload)
+        options.onEvent({
+          kind: 'message.completed',
+          conversation
+        })
+      }
+    )
+    vi.mocked(streamRegenerateConversationMessage).mockImplementation(
+      async (conversationId, messageId, payload, options) => {
+        const conversation = await regenerateConversationMessage(conversationId, messageId, payload)
+        options.onEvent({
+          kind: 'message.completed',
+          conversation
+        })
+      }
+    )
     vi.mocked(regenerateConversationMessage).mockResolvedValue({
       id: 'conv_1',
       title: '手动标题',
@@ -835,6 +882,310 @@ describe('useChatSession', () => {
     expect(result.current.activeSession?.title).toBe('手动标题')
   })
 
+  it('keeps streamed messages visible when a stale detail request resolves afterwards', async () => {
+    const detailDeferred = createDeferred<unknown>()
+    const streamDeferred = createDeferred<void>()
+
+    vi.mocked(getChatConversation).mockReturnValueOnce(detailDeferred.promise)
+    vi.mocked(streamConversationMessage).mockImplementationOnce(
+      async (_conversationId, _payload, options) => {
+        options.onEvent({
+          kind: 'message.created',
+          branchId: 'branch_main',
+          userMessageId: 'msg_server_user',
+          assistantMessageId: 'msg_server_assistant'
+        })
+        options.onEvent({
+          kind: 'message.delta',
+          assistantMessageId: 'msg_server_assistant',
+          delta: '流式中',
+          content: '流式中'
+        })
+        await streamDeferred.promise
+        options.onEvent({
+          kind: 'message.completed',
+          assistantMessageId: 'msg_server_assistant',
+          conversation: {
+            id: 'conv_1',
+            title: '手动标题',
+            draft_config: {
+              model: 'gpt-lite',
+              prompt_id: '',
+              strategy: 'balanced',
+              temperature: 0,
+              variables: {}
+            },
+            last_message_at: 3000,
+            last_message_preview: '流式完成',
+            last_message_role: 'assistant',
+            active_branch_id: 'branch_main',
+            message_count: 2,
+            created_at: 1000,
+            updated_at: 3000,
+            branches: [
+              {
+                id: 'branch_main',
+                name: 'main',
+                head_message_id: 'msg_server_assistant',
+                base_message_id: 'msg_server_user'
+              }
+            ],
+            message_nodes: {
+              msg_server_user: {
+                id: 'msg_server_user',
+                role: 'user',
+                content: '抢在详情回来前发送',
+                status: 'completed',
+                timestamp: 2000,
+                parent_id: null,
+                pinned: false,
+                archived: false,
+                stale: false
+              },
+              msg_server_assistant: {
+                id: 'msg_server_assistant',
+                role: 'assistant',
+                content: '流式完成',
+                status: 'completed',
+                timestamp: 3000,
+                parent_id: 'msg_server_user',
+                pinned: false,
+                archived: false,
+                stale: false
+              }
+            },
+            messages: [
+              {
+                id: 'msg_server_user',
+                role: 'user',
+                content: '抢在详情回来前发送',
+                status: 'completed',
+                timestamp: 2000,
+                parent_id: null,
+                pinned: false,
+                archived: false,
+                stale: false
+              },
+              {
+                id: 'msg_server_assistant',
+                role: 'assistant',
+                content: '流式完成',
+                status: 'completed',
+                timestamp: 3000,
+                parent_id: 'msg_server_user',
+                pinned: false,
+                archived: false,
+                stale: false
+              }
+            ]
+          }
+        })
+      }
+    )
+
+    const { result } = renderHook(() => useChatSession(true))
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe('conv_1')
+    })
+
+    act(() => {
+      void result.current.sendChat('抢在详情回来前发送', draftConfig)
+    })
+
+    await waitFor(() => {
+      expect(result.current.messages.map((message) => message.role)).toEqual(['user', 'assistant'])
+    })
+    expect(result.current.messages[0]?.content).toBe('抢在详情回来前发送')
+    expect(result.current.messages[1]?.content).toBe('流式中')
+
+    await act(async () => {
+      detailDeferred.resolve({
+        id: 'conv_1',
+        title: '手动标题',
+        draft_config: {
+          model: 'gpt-lite',
+          prompt_id: '',
+          strategy: 'balanced',
+          temperature: 0,
+          variables: {}
+        },
+        last_message_at: null,
+        last_message_preview: null,
+        last_message_role: null,
+        active_branch_id: 'branch_main',
+        message_count: 0,
+        created_at: 1000,
+        updated_at: 1000,
+        branches: [mainBranch],
+        message_nodes: {},
+        messages: []
+      })
+    })
+
+    expect(result.current.messages.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(result.current.messages[0]?.content).toBe('抢在详情回来前发送')
+    expect(result.current.messages[1]?.content).toBe('流式中')
+
+    await act(async () => {
+      streamDeferred.resolve(undefined)
+    })
+
+    await waitFor(() => {
+      expect(result.current.messages[1]?.content).toBe('流式完成')
+    })
+  })
+
+  it('shows optimistic user and streaming assistant messages for server-rendered sessions', async () => {
+    const streamDeferred = createDeferred<void>()
+
+    vi.mocked(getChatConversation).mockResolvedValueOnce({
+      id: 'conv_1',
+      title: '手动标题',
+      draft_config: {
+        model: 'gpt-lite',
+        prompt_id: '',
+        strategy: 'balanced',
+        temperature: 0,
+        variables: {}
+      },
+      last_message_at: 2000,
+      last_message_preview: '上一条回复',
+      last_message_role: 'assistant',
+      active_branch_id: 'branch_main',
+      message_count: 2,
+      created_at: 1000,
+      updated_at: 2000,
+      branches: [
+        {
+          id: 'branch_main',
+          name: 'main',
+          head_message_id: 'msg_2',
+          base_message_id: 'msg_1'
+        }
+      ],
+      message_nodes: {
+        msg_1: {
+          id: 'msg_1',
+          role: 'user',
+          content: '上一条问题',
+          status: 'completed',
+          timestamp: 1500,
+          parent_id: null,
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_2: {
+          id: 'msg_2',
+          role: 'assistant',
+          content: '上一条回复',
+          status: 'completed',
+          timestamp: 2000,
+          parent_id: 'msg_1',
+          pinned: false,
+          archived: false,
+          stale: false
+        }
+      },
+      visible_messages: [
+        {
+          virtual_id: 'summary:branch_main:msg_2:0',
+          kind: 'summary',
+          role: 'summary',
+          content: '压缩摘要',
+          source_node_id: null,
+          timestamp: 1400
+        },
+        {
+          virtual_id: 'msg_1',
+          kind: 'node',
+          role: 'user',
+          content: '上一条问题',
+          source_node_id: 'msg_1',
+          timestamp: 1500
+        },
+        {
+          virtual_id: 'msg_2',
+          kind: 'node',
+          role: 'assistant',
+          content: '上一条回复',
+          source_node_id: 'msg_2',
+          timestamp: 2000
+        }
+      ],
+      messages: [
+        {
+          id: 'msg_1',
+          role: 'user',
+          content: '上一条问题',
+          status: 'completed',
+          timestamp: 1500,
+          parent_id: null,
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        {
+          id: 'msg_2',
+          role: 'assistant',
+          content: '上一条回复',
+          status: 'completed',
+          timestamp: 2000,
+          parent_id: 'msg_1',
+          pinned: false,
+          archived: false,
+          stale: false
+        }
+      ]
+    })
+
+    vi.mocked(streamConversationMessage).mockImplementationOnce(
+      async (_conversationId, _payload, options) => {
+        options.onEvent({
+          kind: 'message.created',
+          branchId: 'branch_main',
+          userMessageId: 'msg_3',
+          assistantMessageId: 'msg_4'
+        })
+        options.onEvent({
+          kind: 'message.delta',
+          assistantMessageId: 'msg_4',
+          delta: '流式回答中',
+          content: '流式回答中'
+        })
+        await streamDeferred.promise
+      }
+    )
+
+    const { result } = renderHook(() => useChatSession(true))
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe('conv_1')
+    })
+
+    await act(async () => {
+      await result.current.selectSession('conv_1')
+    })
+
+    act(() => {
+      void result.current.sendChat('现在的问题', draftConfig)
+    })
+
+    await waitFor(() => {
+      expect(result.current.messages.slice(-2).map((message) => message.role)).toEqual([
+        'user',
+        'assistant'
+      ])
+    })
+    expect(result.current.messages.at(-2)?.content).toBe('现在的问题')
+    expect(result.current.messages.at(-1)?.content).toBe('流式回答中')
+
+    await act(async () => {
+      streamDeferred.resolve(undefined)
+    })
+  })
+
   it('submits pending edits with the next message and clears local diff buffer', async () => {
     vi.mocked(getChatConversation).mockResolvedValueOnce({
       id: 'conv_1',
@@ -933,7 +1284,7 @@ describe('useChatSession', () => {
       await result.current.sendChat('继续', draftConfig)
     })
 
-    expect(sendConversationMessageWithEdits).toHaveBeenCalledWith('conv_1', {
+    expect(streamConversationMessageWithEdits).toHaveBeenCalledWith('conv_1', {
       content: '继续',
       draftConfig,
       modifiedNodes: [
@@ -942,7 +1293,7 @@ describe('useChatSession', () => {
           content: '改写后的第一条消息'
         }
       ]
-    })
+    }, expect.any(Object))
     expect(result.current.pendingEditCount).toBe(0)
     expect(result.current.messages[0]?.content).toBe('改写后的第一条消息')
     expect(result.current.messages[0]?.pendingEdit).toBeFalsy()
@@ -1210,10 +1561,10 @@ describe('useChatSession', () => {
     })
 
     expect(mode).toBe('branch_user')
-    expect(editConversationMessageInBranch).toHaveBeenCalledWith('conv_1', 'msg_1', {
+    expect(streamEditConversationMessageInBranch).toHaveBeenCalledWith('conv_1', 'msg_1', {
       content: '改写后的第一条消息',
       draftConfig
-    })
+    }, expect.any(Object))
     expect(result.current.activeSession?.activeBranchId).toBe('branch_side')
     expect(result.current.messages.map((message) => message.id)).toEqual(['msg_5', 'msg_6'])
   })
@@ -1312,7 +1663,7 @@ describe('useChatSession', () => {
       await result.current.regenerateAssistantMessage('msg_2', draftConfig)
     })
 
-    expect(regenerateConversationMessage).toHaveBeenCalledWith('conv_1', 'msg_2', {
+    expect(streamRegenerateConversationMessage).toHaveBeenCalledWith('conv_1', 'msg_2', {
       draftConfig,
       modifiedNodes: [
         {
@@ -1320,7 +1671,7 @@ describe('useChatSession', () => {
           content: '改写后的第一条消息'
         }
       ]
-    })
+    }, expect.any(Object))
     expect(result.current.pendingEditCount).toBe(0)
     expect(result.current.messages.map((message) => message.id)).toEqual(['msg_1', 'msg_3'])
     expect(result.current.messages[1]?.content).toBe('重试后的回复')
@@ -1850,10 +2201,10 @@ describe('useChatSession', () => {
       await result.current.regenerateAssistantMessage('msg_2', draftConfig)
     })
 
-    expect(regenerateConversationMessage).toHaveBeenCalledWith('conv_1', 'msg_2', {
+    expect(streamRegenerateConversationMessage).toHaveBeenCalledWith('conv_1', 'msg_2', {
       draftConfig,
       modifiedNodes: []
-    })
+    }, expect.any(Object))
     expect(result.current.activeSession?.activeBranch?.headMessageId).toBe('msg_4')
     expect(result.current.messages.map((message) => message.id)).toEqual([
       'msg_1',

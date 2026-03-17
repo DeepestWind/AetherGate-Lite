@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getActiveChatBranch,
   normalizeChatSession,
+  normalizeChatStreamEvent,
   normalizeChatSessions,
   resolveChatSessionGraph
 } from '@/features/chat/chat-adapters'
@@ -11,6 +12,7 @@ import {
   type ChatConfig,
   type ChatMessage,
   type ChatSession,
+  type ChatStreamEvent,
   defaultChatConfig
 } from '@/features/chat/chat-types'
 import {
@@ -18,14 +20,15 @@ import {
   createConversationBranch,
   createChatConversation,
   deleteChatConversation,
-  editConversationMessageInBranch,
   getChatConversation,
   listChatConversations,
-  regenerateConversationMessage,
   renameChatConversation,
   selectConversationMessage,
-  sendConversationMessage,
-  sendConversationMessageWithEdits,
+  stopConversationMessageGeneration,
+  streamConversationMessage,
+  streamConversationMessageWithEdits,
+  streamEditConversationMessageInBranch,
+  streamRegenerateConversationMessage,
   updateConversationMessagePin,
   updateChatConversationConfig
 } from '@/shared/api/modules/chat'
@@ -55,6 +58,7 @@ type UseChatSessionResult = {
   selectSession: (sessionId: string) => Promise<void>
   setPendingEdit: (messageId: string, content: string) => void
   sendChat: (content: string, config: ChatConfig) => Promise<void>
+  stopChat: () => Promise<void>
   sessions: ChatSession[]
   sending: boolean
   toggleMessagePin: (messageId: string, pinned: boolean) => Promise<void>
@@ -62,6 +66,14 @@ type UseChatSessionResult = {
 
 type PendingEditsBySession = Record<string, Record<string, string>>
 type AssistantPreviewSelectionsBySession = Record<string, Record<string, Record<string, string>>>
+type ActiveStreamState = {
+  assistantMessageId: string | null
+  controller: AbortController
+  sessionId: string
+  stopRequested: boolean
+  tempAssistantMessageId: string | null
+  tempUserMessageId: string | null
+}
 
 function buildErrorCallInfo(strategy: ChatConfig['strategy'], latencyMs: number): ChatCallInfo {
   return {
@@ -97,6 +109,15 @@ function mergeSessionState(
   currentSession: ChatSession | undefined,
   incoming: ChatSession
 ): ChatSession {
+  if (
+    currentSession &&
+    currentSession.messagesLoaded &&
+    incoming.messagesLoaded &&
+    incoming.messageCount < currentSession.messageCount
+  ) {
+    return currentSession
+  }
+
   const shouldPreserveGraph = !incoming.messagesLoaded && Boolean(currentSession?.messagesLoaded)
   const messagesLoaded = shouldPreserveGraph
     ? (currentSession?.messagesLoaded ?? false)
@@ -337,6 +358,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     useState<AssistantPreviewSelectionsBySession>({})
   const [pendingEditsBySession, setPendingEditsBySession] = useState<PendingEditsBySession>({})
   const [sendingSessionId, setSendingSessionId] = useState<string | null>(null)
+  const activeStreamRef = useRef<ActiveStreamState | null>(null)
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -381,6 +403,112 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     setSessions((current) => upsertSessions(current, detail))
     return detail
   }, [])
+
+  async function runStreamingRequest({
+    request,
+    sessionId,
+    startedAt,
+    strategy,
+    tempAssistantMessageId = null,
+    tempUserMessageId = null
+  }: {
+    request: (options: { onEvent: (event: unknown) => void; signal: AbortSignal }) => Promise<void>
+    sessionId: string
+    startedAt: number
+    strategy: ChatConfig['strategy']
+    tempAssistantMessageId?: string | null
+    tempUserMessageId?: string | null
+  }): Promise<ChatSession | null> {
+    const controller = new AbortController()
+    let finalSession: ChatSession | null = null
+    activeStreamRef.current = {
+      assistantMessageId: null,
+      controller,
+      sessionId,
+      stopRequested: false,
+      tempAssistantMessageId,
+      tempUserMessageId
+    }
+    setSendingSessionId(sessionId)
+
+    try {
+      await request({
+        signal: controller.signal,
+        onEvent: (rawEvent) => {
+          const event = normalizeChatStreamEvent(rawEvent)
+          if (!event) {
+            return
+          }
+
+          if (event.kind === 'message.created') {
+            if (activeStreamRef.current?.controller === controller) {
+              activeStreamRef.current = {
+                ...activeStreamRef.current,
+                assistantMessageId: event.assistantMessageId
+              }
+            }
+            setSessions((current) =>
+              current.map((session) =>
+                session.id === sessionId
+                  ? applyStreamCreated(
+                      session,
+                      event,
+                      tempUserMessageId,
+                      tempAssistantMessageId
+                    )
+                  : session
+              )
+            )
+            return
+          }
+
+          if (event.kind === 'message.delta') {
+            setSessions((current) =>
+              current.map((session) =>
+                session.id === sessionId
+                  ? applyStreamDelta(session, event.assistantMessageId, event.content)
+                  : session
+              )
+            )
+            return
+          }
+
+          if (
+            event.kind === 'message.completed' ||
+            event.kind === 'message.error' ||
+            event.kind === 'message.stopped'
+          ) {
+            if (event.conversation) {
+              const updated = normalizeChatSession(event.conversation)
+              finalSession = updated
+              setSessions((current) => upsertSessions(current, updated))
+            }
+          }
+        }
+      })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '未知错误'
+      const errorCallInfo = buildErrorCallInfo(strategy, Date.now() - startedAt)
+
+      if (tempAssistantMessageId) {
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === sessionId
+              ? applyOptimisticError(session, tempAssistantMessageId, detail, errorCallInfo)
+              : session
+          )
+        )
+      }
+      throw error
+    } finally {
+      if (activeStreamRef.current?.controller === controller) {
+        activeStreamRef.current = null
+      }
+      setSendingSessionId((current) => (current === sessionId ? null : current))
+    }
+
+    return finalSession
+  }
 
   useEffect(() => {
     if (!enabled) {
@@ -626,38 +754,46 @@ export function useChatSession(enabled = true): UseChatSessionResult {
       return targetMessage.role === 'user' ? 'branch_user' : 'branch_assistant'
     }
 
-    setSendingSessionId(activeSessionId)
-    try {
-      const payload = await editConversationMessageInBranch(activeSessionId, messageId, {
-        content: normalizedContent,
-        draftConfig: config
-      })
-      const updated = normalizeChatSession(payload)
+    const streamedSession = await runStreamingRequest({
+      sessionId: activeSessionId,
+      startedAt: Date.now(),
+      strategy: config.strategy,
+      request: ({ onEvent, signal }) =>
+        streamEditConversationMessageInBranch(
+          activeSessionId,
+          messageId,
+          {
+            content: normalizedContent,
+            draftConfig: config
+          },
+          { onEvent, signal }
+        )
+    })
+    if (!streamedSession) {
+      const updated = await loadConversationDetail(activeSessionId)
       setSessions((current) => upsertSessions(current, updated))
-      setPendingEditsBySession((current) => {
-        const currentSessionEdits = current[activeSessionId]
-        if (!currentSessionEdits || !(messageId in currentSessionEdits)) {
-          return current
-        }
-
-        const nextSessionEdits = { ...currentSessionEdits }
-        delete nextSessionEdits[messageId]
-
-        if (Object.keys(nextSessionEdits).length === 0) {
-          const next = { ...current }
-          delete next[activeSessionId]
-          return next
-        }
-
-        return {
-          ...current,
-          [activeSessionId]: nextSessionEdits
-        }
-      })
-      return targetMessage.role === 'user' ? 'branch_user' : 'branch_assistant'
-    } finally {
-      setSendingSessionId((current) => (current === activeSessionId ? null : current))
     }
+    setPendingEditsBySession((current) => {
+      const currentSessionEdits = current[activeSessionId]
+      if (!currentSessionEdits || !(messageId in currentSessionEdits)) {
+        return current
+      }
+
+      const nextSessionEdits = { ...currentSessionEdits }
+      delete nextSessionEdits[messageId]
+
+      if (Object.keys(nextSessionEdits).length === 0) {
+        const next = { ...current }
+        delete next[activeSessionId]
+        return next
+      }
+
+      return {
+        ...current,
+        [activeSessionId]: nextSessionEdits
+      }
+    })
+    return targetMessage.role === 'user' ? 'branch_user' : 'branch_assistant'
   }
 
   function clearPendingEdit(messageId: string) {
@@ -720,6 +856,19 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     setSessions((current) => upsertSessions(current, updated))
   }
 
+  async function stopChat() {
+    const activeStream = activeStreamRef.current
+    if (!activeStream?.assistantMessageId) {
+      return
+    }
+
+    activeStreamRef.current = {
+      ...activeStream,
+      stopRequested: true
+    }
+    await stopConversationMessageGeneration(activeStream.sessionId, activeStream.assistantMessageId)
+  }
+
   async function regenerateAssistantMessage(messageId: string, config: ChatConfig) {
     if (!activeSessionId || sendingSessionId || !activeSession) {
       return
@@ -733,42 +882,47 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     const activeBranchId = activeSession.activeBranchId
     const leafAssistantGroup = isLeafAssistantGroup(activeSession, messageId)
     const modifiedNodes = buildModifiedNodesPayload(pendingEdits)
-    setSendingSessionId(activeSessionId)
 
-    try {
-      const payload = await regenerateConversationMessage(activeSessionId, messageId, {
-        draftConfig: config,
-        modifiedNodes
-      })
-      const updated = normalizeChatSession(payload)
-      setSessions((current) => upsertSessions(current, updated))
-      if (!leafAssistantGroup && activeBranchId) {
-        const newestSibling = findLatestAssistantSibling(updated.messageNodes, targetMessage.parentId)
-        if (newestSibling) {
-          setAssistantPreviewSelectionsBySession((current) =>
-            setBranchAssistantPreviewSelection(
-              current,
-              activeSessionId,
-              activeBranchId,
-              targetMessage.parentId!,
-              newestSibling.id
-            )
+    const streamedSession = await runStreamingRequest({
+      sessionId: activeSessionId,
+      startedAt: Date.now(),
+      strategy: config.strategy,
+      request: ({ onEvent, signal }) =>
+        streamRegenerateConversationMessage(
+          activeSessionId,
+          messageId,
+          {
+            draftConfig: config,
+            modifiedNodes
+          },
+          { onEvent, signal }
+        )
+    })
+    const refreshed = streamedSession ?? (await loadConversationDetail(activeSessionId))
+    if (!leafAssistantGroup && activeBranchId) {
+      const newestSibling = findLatestAssistantSibling(refreshed.messageNodes, targetMessage.parentId)
+      if (newestSibling) {
+        setAssistantPreviewSelectionsBySession((current) =>
+          setBranchAssistantPreviewSelection(
+            current,
+            activeSessionId,
+            activeBranchId,
+            targetMessage.parentId!,
+            newestSibling.id
           )
+        )
+      }
+    }
+    if (modifiedNodes.length > 0) {
+      setPendingEditsBySession((current) => {
+        if (!(activeSessionId in current)) {
+          return current
         }
-      }
-      if (modifiedNodes.length > 0) {
-        setPendingEditsBySession((current) => {
-          if (!(activeSessionId in current)) {
-            return current
-          }
 
-          const next = { ...current }
-          delete next[activeSessionId]
-          return next
-        })
-      }
-    } finally {
-      setSendingSessionId((current) => (current === activeSessionId ? null : current))
+        const next = { ...current }
+        delete next[activeSessionId]
+        return next
+      })
     }
   }
 
@@ -863,22 +1017,27 @@ export function useChatSession(enabled = true): UseChatSessionResult {
         session.id === activeSessionId ? appendOptimisticMessages(session, config, userMessage, assistantPlaceholder, startedAt) : session
       )
     )
-    setSendingSessionId(activeSessionId)
 
     try {
-      const payload =
-        modifiedNodes.length > 0
-          ? await sendConversationMessageWithEdits(activeSessionId, {
-              content: normalizedContent,
-              draftConfig: config,
-              modifiedNodes
-            })
-          : await sendConversationMessage(activeSessionId, {
-              content: normalizedContent,
-              draftConfig: config
-            })
-      const updated = normalizeChatSession(payload)
-      setSessions((current) => upsertSessions(current, updated))
+      const streamedSession = await runStreamingRequest({
+        sessionId: activeSessionId,
+        startedAt,
+        strategy: config.strategy,
+        tempAssistantMessageId: assistantPlaceholder.id,
+        tempUserMessageId: userMessage.id,
+        request: ({ onEvent, signal }) =>
+          modifiedNodes.length > 0
+            ? streamConversationMessageWithEdits(activeSessionId, {
+                content: normalizedContent,
+                draftConfig: config,
+                modifiedNodes
+              }, { onEvent, signal })
+            : streamConversationMessage(activeSessionId, {
+                content: normalizedContent,
+                draftConfig: config
+              }, { onEvent, signal })
+      })
+      const updated = streamedSession ?? (await loadConversationDetail(activeSessionId))
       if (modifiedNodes.length > 0) {
         setPendingEditsBySession((current) => {
           if (!(activeSessionId in current)) {
@@ -890,19 +1049,9 @@ export function useChatSession(enabled = true): UseChatSessionResult {
           return next
         })
       }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : '未知错误'
-      const errorCallInfo = buildErrorCallInfo(config.strategy, Date.now() - startedAt)
-
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === activeSessionId
-            ? applyOptimisticError(session, assistantPlaceholder.id, detail, errorCallInfo)
-            : session
-        )
-      )
-    } finally {
-      setSendingSessionId((current) => (current === activeSessionId ? null : current))
+      setSessions((current) => upsertSessions(current, updated))
+    } catch {
+      // `runStreamingRequest` already projects an optimistic error when applicable.
     }
   }
 
@@ -927,6 +1076,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     selectSession,
     setPendingEdit,
     sendChat,
+    stopChat,
     sessions,
     sending: sendingSessionId !== null,
     toggleMessagePin
@@ -956,8 +1106,14 @@ function appendOptimisticMessages(
 ) {
   const activeBranch = ensureActiveBranch(session)
   const userNode = {
+    kind: 'node' as const,
     ...userMessage,
     parentId: activeBranch.headMessageId
+  }
+  const assistantNode = {
+    kind: 'node' as const,
+    ...assistantPlaceholder,
+    parentId: userNode.id
   }
   const nextBranches = (
     session.branches.length > 0 ? session.branches : [activeBranch]
@@ -973,11 +1129,12 @@ function appendOptimisticMessages(
   const nextMessageNodes = {
     ...session.messageNodes,
     [userNode.id]: userNode,
-    [assistantPlaceholder.id]: {
-      ...assistantPlaceholder,
-      parentId: userNode.id
-    }
+    [assistantPlaceholder.id]: assistantNode
   }
+  const nextMessages =
+    session.messagesSource === 'server'
+      ? [...session.messages, userNode, assistantNode]
+      : session.messages
 
   return buildSessionGraph({
     ...session,
@@ -985,6 +1142,7 @@ function appendOptimisticMessages(
     branches: nextBranches,
     draftConfig: config,
     messageNodes: nextMessageNodes,
+    messages: nextMessages,
     messagesLoaded: true,
     messageCount: session.messageCount + 2,
     lastMessagePreview: normalizedContentPreview(userNode.content),
@@ -1005,25 +1163,183 @@ function applyOptimisticError(
   if (!assistantMessage) {
     return session
   }
+  const nextAssistantMessage = {
+    ...assistantMessage,
+    content: `调用失败：${detail}`,
+    status: 'error' as const,
+    loading: false,
+    errorMessage: detail,
+    callInfo: errorCallInfo,
+    timestamp: failedAt
+  }
+  const nextMessages =
+    session.messagesSource === 'server'
+      ? session.messages.map((message) =>
+          message.id === assistantMessageId ? nextAssistantMessage : message
+        )
+      : session.messages
 
   return buildSessionGraph({
     ...session,
     messageNodes: {
       ...session.messageNodes,
-      [assistantMessageId]: {
-        ...assistantMessage,
-        content: `调用失败：${detail}`,
-        status: 'error',
-        loading: false,
-        errorMessage: detail,
-        callInfo: errorCallInfo,
-        timestamp: failedAt
-      }
+      [assistantMessageId]: nextAssistantMessage
     },
+    messages: nextMessages,
     lastMessagePreview: `调用失败：${detail}`,
     lastMessageRole: 'assistant',
     lastMessageAt: failedAt,
     updatedAt: failedAt
+  })
+}
+
+function applyStreamCreated(
+  session: ChatSession,
+  event: Extract<ChatStreamEvent, { kind: 'message.created' }>,
+  tempUserMessageId: string | null,
+  tempAssistantMessageId: string | null
+) {
+  const nextMessageNodes = { ...session.messageNodes }
+  let nextMessages = session.messages
+  const activeBranch = ensureActiveBranch(session)
+
+  if (
+    tempUserMessageId &&
+    tempAssistantMessageId &&
+    nextMessageNodes[tempUserMessageId] &&
+    nextMessageNodes[tempAssistantMessageId]
+  ) {
+    const userNode = nextMessageNodes[tempUserMessageId]
+    const assistantNode = nextMessageNodes[tempAssistantMessageId]
+    delete nextMessageNodes[tempUserMessageId]
+    delete nextMessageNodes[tempAssistantMessageId]
+    nextMessageNodes[event.userMessageId ?? event.assistantMessageId] = {
+      ...userNode,
+      id: event.userMessageId ?? userNode.id
+    }
+    nextMessageNodes[event.assistantMessageId] = {
+      ...assistantNode,
+      id: event.assistantMessageId,
+      parentId: event.userMessageId ?? assistantNode.parentId
+    }
+    if (session.messagesSource === 'server') {
+      nextMessages = session.messages.map((message) => {
+        if (message.id === tempUserMessageId) {
+          return {
+            ...message,
+            id: event.userMessageId ?? message.id,
+            sourceNodeId: event.userMessageId ?? message.sourceNodeId ?? null
+          }
+        }
+        if (message.id === tempAssistantMessageId) {
+          return {
+            ...message,
+            id: event.assistantMessageId,
+            parentId: event.userMessageId ?? message.parentId,
+            sourceNodeId: event.assistantMessageId
+          }
+        }
+        return message
+      })
+    }
+  } else if (!nextMessageNodes[event.assistantMessageId]) {
+    const parentId = event.userMessageId
+    if (!parentId || !nextMessageNodes[parentId]) {
+      return session
+    }
+    nextMessageNodes[event.assistantMessageId] = {
+      id: event.assistantMessageId,
+      kind: 'node',
+      role: 'assistant',
+      content: '',
+      status: 'pending',
+      timestamp: Date.now(),
+      parentId,
+      sourceNodeId: null,
+      modifiedFrom: null,
+      pinned: false,
+      archived: false,
+      stale: false,
+      errorMessage: null,
+      callInfo: null,
+      loading: true
+    }
+    if (session.messagesSource === 'server') {
+      nextMessages = [
+        ...session.messages,
+        nextMessageNodes[event.assistantMessageId]
+      ]
+    }
+  }
+
+  const targetBranchId = event.branchId ?? activeBranch.id
+  const sourceBranches = session.branches.length > 0 ? session.branches : [activeBranch]
+  let matchedBranch = false
+  const nextBranches = sourceBranches.map((branch) => {
+    if (branch.id !== targetBranchId && branch.id !== activeBranch.id) {
+      return branch
+    }
+
+    matchedBranch = true
+    return {
+      ...branch,
+      id: targetBranchId,
+      headMessageId: event.assistantMessageId
+    }
+  })
+
+  if (!matchedBranch) {
+    nextBranches.push({
+      id: targetBranchId,
+      name: activeBranch.name,
+      baseMessageId: activeBranch.baseMessageId,
+      headMessageId: event.assistantMessageId
+    })
+  }
+
+  return buildSessionGraph({
+    ...session,
+    activeBranchId: targetBranchId,
+    branches: nextBranches,
+    messageNodes: nextMessageNodes,
+    messages: nextMessages,
+    messagesLoaded: true
+  })
+}
+
+function applyStreamDelta(
+  session: ChatSession,
+  assistantMessageId: string,
+  content: string
+) {
+  const assistantMessage = session.messageNodes[assistantMessageId]
+  if (!assistantMessage) {
+    return session
+  }
+  const nextAssistantMessage = {
+    ...assistantMessage,
+    content,
+    loading: false,
+    status: 'pending' as const,
+    timestamp: Date.now()
+  }
+  const nextMessages =
+    session.messagesSource === 'server'
+      ? session.messages.map((message) =>
+          message.id === assistantMessageId ? nextAssistantMessage : message
+        )
+      : session.messages
+
+  return buildSessionGraph({
+    ...session,
+    messageNodes: {
+      ...session.messageNodes,
+      [assistantMessageId]: nextAssistantMessage
+    },
+    messages: nextMessages,
+    lastMessagePreview: normalizedContentPreview(content || session.lastMessagePreview || ''),
+    lastMessageRole: 'assistant',
+    updatedAt: Date.now()
   })
 }
 

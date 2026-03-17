@@ -4,6 +4,7 @@ import {
   type ChatConfig,
   type ChatMessage,
   type ChatSession,
+  type ChatStreamEvent,
   defaultChatConfig,
   type PromptTemplate
 } from '@/features/chat/chat-types'
@@ -193,13 +194,15 @@ function normalizeChatCallInfo(payload: unknown): ChatCallInfo | null {
 
 export function normalizeChatMessage(payload: unknown): ChatMessage {
   const row = isRecord(payload) ? payload : {}
+  const content = String(readValue(row, ['content'], ''))
+  const status = String(readValue(row, ['status'], 'completed')) as ChatMessage['status']
 
   return {
     id: String(readValue(row, ['id'], crypto.randomUUID())),
     kind: String(readValue(row, ['kind'], 'node')) as ChatMessage['kind'],
     role: String(readValue(row, ['role'], 'assistant')) as ChatMessage['role'],
-    content: String(readValue(row, ['content'], '')),
-    status: String(readValue(row, ['status'], 'completed')) as ChatMessage['status'],
+    content,
+    status,
     timestamp: toNumber(readValue(row, ['timestamp'], Date.now())),
     parentId:
       String(readValue(row, ['parentId', 'parent_id'], '')) || null,
@@ -212,8 +215,69 @@ export function normalizeChatMessage(payload: unknown): ChatMessage {
     stale: Boolean(readValue(row, ['stale'], false)),
     errorMessage: String(readValue(row, ['errorMessage', 'error_message'], '')) || null,
     callInfo: normalizeChatCallInfo(readValue(row, ['callInfo', 'call_info'], null)),
-    loading: String(readValue(row, ['status'], 'completed')) === 'pending'
+    loading: status === 'pending' && content.length === 0
   }
+}
+
+export function normalizeChatStreamEvent(payload: unknown): ChatStreamEvent | null {
+  if (!isRecord(payload)) {
+    return null
+  }
+
+  const kind = String(readValue(payload, ['kind', 'type'], ''))
+  if (!kind) {
+    return null
+  }
+
+  if (kind === 'message.created') {
+    return {
+      kind,
+      assistantMessageId: String(readValue(payload, ['assistantMessageId'], '')),
+      branchId: String(readValue(payload, ['branchId'], '')) || null,
+      userMessageId: String(readValue(payload, ['userMessageId'], '')) || null
+    }
+  }
+
+  if (kind === 'message.meta') {
+    const meta = readValue(payload, ['meta'], {})
+    if (!isRecord(meta)) {
+      return null
+    }
+    return {
+      kind,
+      assistantMessageId: String(readValue(payload, ['assistantMessageId'], '')),
+      meta: {
+        requestId: String(readValue(meta, ['requestId', 'request_id'], '')),
+        provider: String(readValue(meta, ['provider'], '')),
+        model: String(readValue(meta, ['model'], '')),
+        routeReason: String(readValue(meta, ['routeReason', 'route_reason'], '')),
+        cacheHit: Boolean(readValue(meta, ['cacheHit', 'cache_hit'], false)),
+        endpointId: String(readValue(meta, ['endpointId', 'endpoint_id'], '')),
+        fallbackCount: toNumber(readValue(meta, ['fallbackCount', 'fallback_count'], 0)),
+        strategy: String(readValue(meta, ['strategy'], defaultChatConfig.strategy)) as ChatConfig['strategy']
+      }
+    }
+  }
+
+  if (kind === 'message.delta') {
+    return {
+      kind,
+      assistantMessageId: String(readValue(payload, ['assistantMessageId'], '')),
+      content: String(readValue(payload, ['content'], '')),
+      delta: String(readValue(payload, ['delta'], ''))
+    }
+  }
+
+  if (kind === 'message.completed' || kind === 'message.error' || kind === 'message.stopped') {
+    return {
+      kind,
+      assistantMessageId: String(readValue(payload, ['assistantMessageId'], '')),
+      conversation: readValue(payload, ['conversation'], undefined),
+      errorMessage: String(readValue(payload, ['errorMessage', 'error_message'], '')) || null
+    }
+  }
+
+  return null
 }
 
 function normalizeVisibleChatMessage(

@@ -28,6 +28,8 @@ type PendingConfirmation = {
   tone?: 'danger' | 'default'
 } | null
 
+const MAX_MESSAGE_LENGTH = 32_768
+
 export function ChatPage() {
   const { hasHydrated, hasToken } = useApiAccessState()
   const modelsQuery = useChatModelsQuery()
@@ -108,7 +110,8 @@ export function ChatPage() {
   const branchCount = session.activeSession?.branches.length ?? 0
   const pendingEditCount = session.pendingEditCount
 
-  const sendDisabled = !inputDraft.trim() || session.sending || !config.model
+  const sendDisabled =
+    !inputDraft.trim() || session.sending || !config.model || inputDraft.length > MAX_MESSAGE_LENGTH
 
   const handleSend = async () => {
     const content = inputDraft.trim()
@@ -354,6 +357,7 @@ export function ChatPage() {
             sendDisabled={sendDisabled}
             onChange={setInputDraft}
             onSend={() => void handleSend()}
+            onStop={() => void session.stopChat()}
           />
         </div>
         </div>

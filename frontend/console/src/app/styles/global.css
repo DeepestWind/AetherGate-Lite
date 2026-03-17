@@ -135,3 +135,105 @@
     background: rgba(121, 124, 132, 0.38);
   }
 }
+
+@layer components {
+  .branchat-markdown {
+    @apply text-[14px] leading-7 text-foreground;
+  }
+
+  .branchat-markdown > *:first-child {
+    margin-top: 0;
+  }
+
+  .branchat-markdown > *:last-child {
+    margin-bottom: 0;
+  }
+
+  .branchat-markdown h1,
+  .branchat-markdown h2,
+  .branchat-markdown h3,
+  .branchat-markdown h4 {
+    @apply mt-5 mb-2 font-semibold tracking-[-0.03em] text-foreground;
+  }
+
+  .branchat-markdown h1 {
+    @apply text-2xl;
+  }
+
+  .branchat-markdown h2 {
+    @apply text-xl;
+  }
+
+  .branchat-markdown h3 {
+    @apply text-lg;
+  }
+
+  .branchat-markdown p,
+  .branchat-markdown ul,
+  .branchat-markdown ol,
+  .branchat-markdown blockquote,
+  .branchat-markdown pre {
+    @apply my-3;
+  }
+
+  .branchat-markdown ul {
+    @apply list-disc pl-6;
+  }
+
+  .branchat-markdown ol {
+    @apply list-decimal pl-6;
+  }
+
+  .branchat-markdown li {
+    @apply my-1;
+  }
+
+  .branchat-markdown a {
+    @apply font-medium text-accent underline decoration-accent/35 underline-offset-4;
+  }
+
+  .branchat-markdown blockquote {
+    @apply rounded-r-2xl border-l-2 border-accent/45 bg-panel px-4 py-2 text-foreground-soft;
+  }
+
+  .branchat-table-wrap {
+    @apply my-4 overflow-x-auto rounded-2xl border border-border bg-panel;
+  }
+
+  .branchat-table-wrap table {
+    @apply min-w-full border-collapse text-left text-sm;
+  }
+
+  .branchat-table-wrap thead {
+    @apply bg-secondary/80;
+  }
+
+  .branchat-table-wrap th,
+  .branchat-table-wrap td {
+    @apply border-b border-border px-3 py-2 align-top;
+  }
+
+  .branchat-code-block {
+    @apply relative my-4 rounded-2xl border border-border bg-[#171a21] text-[#f3f4f8] shadow-sm;
+  }
+
+  .branchat-code-copy {
+    @apply absolute right-3 top-3 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-medium text-white/80 transition hover:bg-white/14 hover:text-white;
+  }
+
+  .branchat-code-block pre {
+    @apply m-0 overflow-x-auto px-4 py-4 pr-24 text-[13px] leading-6;
+  }
+
+  .branchat-code-block code {
+    @apply bg-transparent p-0 font-mono text-[13px];
+  }
+
+  .branchat-markdown :not(pre) > code {
+    @apply rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[13px];
+  }
+
+  .branchat-markdown input[type="checkbox"] {
+    @apply mr-2 align-middle accent-accent;
+  }
+}

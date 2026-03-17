@@ -7,21 +7,31 @@ import { Textarea } from '@/shared/ui/textarea'
 type InputAreaProps = {
   onChange: (value: string) => void
   onSend: () => void
+  onStop: () => void
   sendDisabled: boolean
   sending: boolean
   value: string
 }
 
-export function InputArea({ onChange, onSend, sendDisabled, sending, value }: InputAreaProps) {
+const MAX_MESSAGE_LENGTH = 32_768
+const WARNING_THRESHOLD = 28_000
+
+export function InputArea({ onChange, onSend, onStop, sendDisabled, sending, value }: InputAreaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [focused, setFocused] = useState(false)
   const charCount = value.length
-  const showCharCount = focused || charCount >= 1600
+  const showCharCount = focused || charCount >= WARNING_THRESHOLD
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      onSend()
+      if (sending) {
+        onStop()
+        return
+      }
+      if (!sendDisabled) {
+        onSend()
+      }
     }
   }
 
@@ -60,17 +70,17 @@ export function InputArea({ onChange, onSend, sendDisabled, sending, value }: In
               <span
                 className={cn(
                   'font-mono text-xs text-muted-foreground',
-                  charCount > 1900 && 'text-warning',
-                  charCount > 2000 && 'text-danger'
+                  charCount > WARNING_THRESHOLD && 'text-warning',
+                  charCount > MAX_MESSAGE_LENGTH && 'text-danger'
                 )}
               >
-                {charCount}/2000
+                {charCount}/{MAX_MESSAGE_LENGTH}
               </span>
             ) : null}
 
-            <Button onClick={onSend} disabled={sendDisabled}>
+            <Button onClick={sending ? onStop : onSend} disabled={sending ? false : sendDisabled}>
               <SendHorizontal className="size-4" />
-              {sending ? '发送中' : '发送'}
+              {sending ? '停止生成' : '发送'}
             </Button>
           </div>
         </div>

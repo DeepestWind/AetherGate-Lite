@@ -80,6 +80,15 @@ export function MessageList({
   const listRef = useRef<HTMLDivElement>(null)
   const messageCount = messages.length
   const siblingMeta = useMemo(() => buildAssistantSiblingMeta(messageNodes), [messageNodes])
+  const stickToBottomRef = useRef(true)
+  const lastMessageSignature = useMemo(() => {
+    const lastMessage = messages[messages.length - 1]
+    if (!lastMessage) {
+      return 'empty'
+    }
+
+    return `${lastMessage.id}:${lastMessage.status}:${lastMessage.content.length}`
+  }, [messages])
 
   useEffect(() => {
     if (!listRef.current) {
@@ -91,11 +100,24 @@ export function MessageList({
       return
     }
 
+    if (!stickToBottomRef.current) {
+      return
+    }
+
     listRef.current.scrollTop = listRef.current.scrollHeight
-  }, [messageCount])
+  }, [lastMessageSignature, messageCount])
 
   return (
-    <div ref={listRef} data-chat-message-list className="h-full min-h-0 flex-1 overflow-y-auto">
+    <div
+      ref={listRef}
+      data-chat-message-list
+      className="h-full min-h-0 flex-1 overflow-y-auto"
+      onScroll={(event) => {
+        const element = event.currentTarget
+        const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
+        stickToBottomRef.current = remaining < 72
+      }}
+    >
       {messages.length === 0 ? (
         <div className="mx-auto flex min-h-full w-full max-w-[820px] flex-col items-center justify-center px-6 py-12 text-center">
           <div className="flex size-12 items-center justify-center rounded-full border border-border bg-panel text-accent">

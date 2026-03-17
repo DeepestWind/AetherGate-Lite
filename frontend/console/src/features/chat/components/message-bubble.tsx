@@ -6,6 +6,7 @@ import type { ChatMessage } from '@/features/chat/chat-types'
 import { cn } from '@/shared/lib/cn'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
+import { ChatMarkdown } from './chat-markdown'
 
 type MessageBubbleProps = {
   message: ChatMessage
@@ -90,6 +91,7 @@ export function MessageBubble({
     message
   const isUser = role === 'user'
   const isSummary = role === 'summary'
+  const isStopped = message.status === 'stopped'
   const canToggleCallInfo = role === 'assistant' && !loading && Boolean(callInfo)
   const canRegenerate = role === 'assistant' && !loading
   const canBranch = role === 'assistant' && !loading
@@ -162,6 +164,7 @@ export function MessageBubble({
             {modifiedFrom ? <span className="text-warning">已改写</span> : null}
             {stale ? <span className="text-warning">旧分支</span> : null}
             {archived ? <span>已归档</span> : null}
+            {isStopped ? <span className="text-warning">已停止</span> : null}
             {!isUser && callInfo?.cacheHit ? (
               <span className="inline-flex items-center gap-1 text-success">
                 <Zap className="size-3" />
@@ -222,14 +225,18 @@ export function MessageBubble({
                   </Button>
                 </div>
               </div>
-            ) : loading ? (
+            ) : loading && !content ? (
               <div className="flex min-h-8 items-center gap-2 px-3">
                 <span className="size-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.2s]" />
                 <span className="size-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.1s]" />
                 <span className="size-2 animate-bounce rounded-full bg-muted-foreground" />
               </div>
             ) : (
-              <div className="whitespace-pre-wrap break-words">{content}</div>
+              isUser ? (
+                <div className="whitespace-pre-wrap break-words">{content}</div>
+              ) : (
+                <ChatMarkdown content={content} />
+              )
             )}
           </div>
 
