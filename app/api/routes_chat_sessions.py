@@ -14,6 +14,7 @@ from app.schemas.chat_sessions import (
     ChatConversationConfig,
     ChatConversationCreate,
     ChatConversationMessageCommitCreate,
+    ChatConversationMessageBranchEditCreate,
     ChatConversationMessageCreate,
     ChatConversationMessagePinUpdate,
     ChatConversationMessageRegenerateCreate,
@@ -22,6 +23,7 @@ from app.schemas.chat_sessions import (
     ChatConversationSummaryResponse,
     ChatConversationUpdate,
     ChatMessageResponse,
+    VisibleMessageResponse,
 )
 from app.services.chat_sessions import chat_session_service
 
@@ -85,6 +87,10 @@ def _to_message_response(message: ChatMessageRecord) -> ChatMessageResponse:
     )
 
 
+def _to_visible_message_response(message: VisibleMessageResponse) -> VisibleMessageResponse:
+    return message
+
+
 def _to_branch_response(branch: ChatBranch) -> ChatBranchResponse:
     return ChatBranchResponse(
         id=branch.branch_id,
@@ -111,7 +117,13 @@ def _to_summary_response(conversation: ChatConversation) -> ChatConversationSumm
 
 def _to_conversation_response(conversation: ChatConversation) -> ChatConversationResponse:
     summary = _to_summary_response(conversation)
-    visible_messages = chat_session_service.flatten_messages(conversation)
+    active_branch = chat_session_service.get_active_branch(conversation)
+    visible_messages = (
+        chat_session_service.flatten_visible_messages(conversation, active_branch)
+        if active_branch is not None
+        else []
+    )
+    flattened_messages = chat_session_service.flatten_messages(conversation)
     node_store = {
         message.message_id: _to_message_response(message)
         for message in conversation.messages
@@ -119,7 +131,8 @@ def _to_conversation_response(conversation: ChatConversation) -> ChatConversatio
     return ChatConversationResponse(
         **summary.model_dump(),
         branches=[_to_branch_response(branch) for branch in conversation.branches],
-        messages=[_to_message_response(message) for message in visible_messages],
+        messages=[_to_message_response(message) for message in flattened_messages],
+        visible_messages=[_to_visible_message_response(message) for message in visible_messages],
         message_nodes=node_store,
     )
 
@@ -205,6 +218,27 @@ async def commit_message_edits_and_send_message(
             payload.content,
             payload.draft_config,
             modified_nodes=payload.modified_nodes,
+        ),
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/branch-edit",
+    response_model=ChatConversationResponse,
+)
+async def edit_message_in_new_branch(
+    conversation_id: str,
+    message_id: str,
+    payload: ChatConversationMessageBranchEditCreate,
+    db: Session = Depends(get_db),
+):
+    return _to_conversation_response(
+        await chat_session_service.edit_message_in_new_branch(
+            db,
+            conversation_id,
+            message_id,
+            payload.content,
+            payload.draft_config,
         ),
     )
 

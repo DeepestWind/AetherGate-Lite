@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 ChatStrategy = Literal["balanced", "cheapest", "quality"]
 ChatMessageRole = Literal["assistant", "summary", "system", "tool", "user"]
 ChatMessageStatus = Literal["completed", "error", "pending"]
+VisibleMessageKind = Literal["node", "summary"]
 
 
 class ChatConversationConfig(BaseModel):
@@ -51,6 +52,11 @@ class ChatConversationMessageRegenerateCreate(BaseModel):
     modified_nodes: list[ChatConversationMessageNodeEdit] = Field(default_factory=list)
 
 
+class ChatConversationMessageBranchEditCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+    draft_config: ChatConversationConfig
+
+
 class ChatConversationMessagePinUpdate(BaseModel):
     pinned: bool = False
 
@@ -92,6 +98,15 @@ class ChatMessageResponse(BaseModel):
     error_message: str | None = None
 
 
+class VisibleMessageResponse(BaseModel):
+    virtual_id: str
+    kind: VisibleMessageKind
+    role: ChatMessageRole
+    content: str
+    source_node_id: str | None = None
+    timestamp: int | None = None
+
+
 class ChatBranchResponse(BaseModel):
     id: str
     name: str
@@ -115,4 +130,5 @@ class ChatConversationSummaryResponse(BaseModel):
 class ChatConversationResponse(ChatConversationSummaryResponse):
     branches: list[ChatBranchResponse] = Field(default_factory=list)
     messages: list[ChatMessageResponse] = Field(default_factory=list)
+    visible_messages: list[VisibleMessageResponse] = Field(default_factory=list)
     message_nodes: dict[str, ChatMessageResponse] = Field(default_factory=dict)

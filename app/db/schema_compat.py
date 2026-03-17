@@ -109,6 +109,11 @@ def _ensure_chat_schema_compatibility(engine: Engine) -> None:
 
     conversation_columns = {column["name"] for column in inspector.get_columns("chat_conversations")}
     message_columns = {column["name"] for column in inspector.get_columns("chat_messages")}
+    branch_columns = (
+        {column["name"] for column in inspector.get_columns("chat_branches")}
+        if "chat_branches" in table_names
+        else set()
+    )
 
     with engine.begin() as connection:
         if "active_branch_id" not in conversation_columns:
@@ -132,6 +137,8 @@ def _ensure_chat_schema_compatibility(engine: Engine) -> None:
             connection.execute(text("ALTER TABLE chat_messages ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"))
         if "stale" not in message_columns:
             connection.execute(text("ALTER TABLE chat_messages ADD COLUMN stale BOOLEAN NOT NULL DEFAULT 0"))
+        if "version" not in message_columns:
+            connection.execute(text("ALTER TABLE chat_messages ADD COLUMN version INTEGER NOT NULL DEFAULT 0"))
 
         _ensure_index(connection, "ix_chat_messages_parent_message_id", "chat_messages", "parent_message_id")
         _ensure_index(
@@ -144,6 +151,17 @@ def _ensure_chat_schema_compatibility(engine: Engine) -> None:
         _ensure_index(connection, "ix_chat_messages_stale", "chat_messages", "stale")
 
         Base.metadata.create_all(bind=connection, tables=[ChatBranch.__table__])
+        if "chat_branches" in table_names:
+            if "compressed_path_json" not in branch_columns:
+                connection.execute(text("ALTER TABLE chat_branches ADD COLUMN compressed_path_json TEXT"))
+            if "compressed_at_head_message_id" not in branch_columns:
+                connection.execute(
+                    text("ALTER TABLE chat_branches ADD COLUMN compressed_at_head_message_id VARCHAR(64)")
+                )
+            if "compressed_source_versions_json" not in branch_columns:
+                connection.execute(
+                    text("ALTER TABLE chat_branches ADD COLUMN compressed_source_versions_json TEXT")
+                )
         _backfill_chat_graph_state(connection)
 
 

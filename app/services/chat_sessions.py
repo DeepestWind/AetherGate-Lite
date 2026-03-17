@@ -14,7 +14,11 @@ from app.models.chat_session import ChatBranch, ChatConversation, ChatMessageRec
 from app.repositories.chat_sessions import ChatConversationRepository
 from app.repositories.request_logs import RequestLogRepository
 from app.schemas.chat import ChatCompletionRequest, ChatMessage
-from app.schemas.chat_sessions import ChatConversationConfig, ChatConversationMessageNodeEdit
+from app.schemas.chat_sessions import (
+    ChatConversationConfig,
+    ChatConversationMessageNodeEdit,
+    VisibleMessageResponse,
+)
 from app.services.gateway import gateway_service
 from app.services.prompt_utils import approximate_tokens
 
@@ -35,6 +39,12 @@ def _next_branch_id() -> str:
     return f"branch_{uuid4().hex}"
 
 
+def _to_millis(value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    return int(value.timestamp() * 1000)
+
+
 def _build_title(content: str) -> str:
     normalized = " ".join(content.strip().split())
     if not normalized:
@@ -49,6 +59,10 @@ def _message_preview(content: str) -> str:
     if len(normalized) <= 120:
         return normalized
     return f"{normalized[:120]}…"
+
+
+def _message_version(message: ChatMessageRecord) -> int:
+    return int(message.version or 0)
 
 
 def _stringify_error(detail: object) -> str:
@@ -79,10 +93,9 @@ class ContextCompressionProfile:
 
 
 @dataclass(frozen=True, slots=True)
-class CompressionSegment:
-    nodes: tuple[ChatMessageRecord, ...]
-    start_index: int
-    end_index: int
+class BranchingEdit:
+    content: str
+    source_message: ChatMessageRecord
 
 
 SMALL_CONTEXT_PROFILE = ContextCompressionProfile(
@@ -183,6 +196,9 @@ class ChatSessionService:
         for branch in conversation.branches:
             branch.head_message_id = None
             branch.base_message_id = None
+            branch.compressed_path_json = None
+            branch.compressed_at_head_message_id = None
+            branch.compressed_source_versions_json = None
         conversation.message_count = 0
         conversation.last_message_preview = None
         conversation.last_message_role = None
@@ -270,11 +286,12 @@ class ChatSessionService:
         message_id: str | None = None,
     ) -> list[ChatMessage]:
         if message_id is not None:
-            source_messages = self.flatten_from_message_id(conversation, message_id)
-        else:
-            source_messages = self.flatten_messages(conversation, branch_id=branch_id)
+            return self._walk_to_context_messages(conversation, message_id)
 
-        return self._records_to_completed_history(source_messages)
+        branch = self._select_branch(conversation, branch_id)
+        if not branch or not branch.head_message_id:
+            return []
+        return self._walk_to_context_messages(conversation, branch.head_message_id)
 
     def set_message_pin(
         self,
@@ -297,9 +314,60 @@ class ChatSessionService:
                 detail="Summary messages stay pinned.",
             )
 
-        message.pinned = pinned
+        if message.pinned != pinned:
+            message.pinned = pinned
+            message.version = _message_version(message) + 1
         conversation.updated_at = _now()
         return self.repository.save(db, conversation)
+
+    async def edit_message_in_new_branch(
+        self,
+        db: Session,
+        conversation_id: str,
+        message_id: str,
+        content: str,
+        config: ChatConversationConfig,
+    ) -> ChatConversation:
+        conversation = self.get_conversation(db, conversation_id)
+        normalized_content = content.strip()
+        if not normalized_content:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Message content is required.",
+            )
+
+        node_store = self.build_message_store(conversation)
+        source_message = node_store.get(message_id)
+        if source_message is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message node not found: {message_id}",
+            )
+        if source_message.role not in {"assistant", "user"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Only user and assistant messages can be edited into a branch.",
+            )
+        if normalized_content == source_message.content_text:
+            return conversation
+        if not self._message_has_visible_children(conversation, source_message.message_id):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Only non-leaf messages can be edited into a new branch.",
+            )
+
+        await self._branch_from_non_leaf_edit(
+            db,
+            conversation,
+            source_message,
+            normalized_content,
+            config,
+            auto_generate_user_reply=source_message.role == "user",
+        )
+        if source_message.role != "user":
+            db.add(conversation)
+            db.commit()
+        return self.get_conversation(db, conversation_id)
 
     def create_branch(
         self,
@@ -363,7 +431,16 @@ class ChatSessionService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message content is required.")
 
         branch = self._get_or_create_active_branch(conversation)
-        self._apply_message_edits(conversation, modified_nodes or [])
+        branching_edit = self._apply_message_edits(conversation, modified_nodes or [])
+        if branching_edit is not None:
+            branch = await self._branch_from_non_leaf_edit(
+                db,
+                conversation,
+                branching_edit.source_message,
+                branching_edit.content,
+                config,
+                auto_generate_user_reply=branching_edit.source_message.role == "user",
+            )
 
         next_seq = conversation.message_count
         user_message = ChatMessageRecord(
@@ -398,8 +475,9 @@ class ChatSessionService:
         conversation.last_message_at = sent_at
         conversation.updated_at = sent_at
 
-        completed_history = self._maybe_compress_context(
+        completed_history = self.prepare_context(
             conversation,
+            branch,
             head_message_id=user_message.message_id,
             model=config.model,
         )
@@ -428,7 +506,12 @@ class ChatSessionService:
     ) -> ChatConversation:
         conversation = self.get_conversation(db, conversation_id)
         branch = self._get_or_create_active_branch(conversation)
-        self._apply_message_edits(conversation, modified_nodes or [])
+        branching_edit = self._apply_message_edits(conversation, modified_nodes or [])
+        if branching_edit is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Non-leaf edits open a new branch directly; please continue from that branch instead of combining with regenerate.",
+            )
 
         node_store = self.build_message_store(conversation)
         source_message = node_store.get(message_id)
@@ -476,8 +559,9 @@ class ChatSessionService:
         else:
             self._sync_active_branch_summary(conversation, branch)
 
-        completed_history = self._maybe_compress_context(
+        completed_history = self.prepare_context(
             conversation,
+            branch,
             head_message_id=source_message.parent_message_id,
             model=config.model,
         )
@@ -554,6 +638,7 @@ class ChatSessionService:
         try:
             result = await gateway_service.handle_chat(db, gateway_request)
             assistant_message.content_text = result.response.choices[0].message.content
+            assistant_message.version = _message_version(assistant_message) + 1
             assistant_message.status = "completed"
             assistant_message.finish_reason = result.response.choices[0].finish_reason
             assistant_message.request_log_id = result.request_log_id
@@ -561,6 +646,7 @@ class ChatSessionService:
             completed_at = _now()
             conversation.updated_at = completed_at
             if move_branch_head:
+                self._append_message_to_branch_cache(branch, assistant_message)
                 conversation.last_message_preview = _message_preview(assistant_message.content_text)
                 conversation.last_message_role = "assistant"
                 conversation.last_message_at = completed_at
@@ -572,6 +658,7 @@ class ChatSessionService:
             request_log = self.request_logs.get_by_request_id(db, request_id) if request_id else None
             error_message = _stringify_error(exc.detail)
             assistant_message.content_text = f"调用失败：{error_message}"
+            assistant_message.version = _message_version(assistant_message) + 1
             assistant_message.status = "error"
             assistant_message.finish_reason = "error"
             assistant_message.request_log_id = request_log.id if request_log else None
@@ -579,6 +666,7 @@ class ChatSessionService:
             completed_at = _now()
             conversation.updated_at = completed_at
             if move_branch_head:
+                self._append_message_to_branch_cache(branch, assistant_message)
                 conversation.last_message_preview = _message_preview(assistant_message.content_text)
                 conversation.last_message_role = "assistant"
                 conversation.last_message_at = completed_at
@@ -586,19 +674,102 @@ class ChatSessionService:
             db.add(conversation)
             db.commit()
 
-    def _records_to_completed_history(
+    def build_context_view(
         self,
-        source_messages: Sequence[ChatMessageRecord],
+        conversation: ChatConversation,
+        branch: ChatBranch,
+        *,
+        head_message_id: str | None = None,
     ) -> list[ChatMessage]:
+        target_head_message_id = head_message_id if head_message_id is not None else branch.head_message_id
+        if not target_head_message_id:
+            return []
+
+        cached_path = self._get_valid_cached_path(conversation, branch, target_head_message_id)
+        if cached_path is None:
+            return self._walk_to_context_messages(conversation, target_head_message_id)
+
+        context_messages: list[ChatMessage] = []
+        for entry in cached_path:
+            role = "system" if str(entry.get("role", "")) == "summary" else str(entry.get("role", ""))
+            if role not in {"assistant", "system", "tool", "user"}:
+                continue
+            context_messages.append(ChatMessage(role=role, content=str(entry.get("content", ""))))
+        return context_messages
+
+    def flatten_visible_messages(
+        self,
+        conversation: ChatConversation,
+        branch: ChatBranch,
+        *,
+        head_message_id: str | None = None,
+    ) -> list[VisibleMessageResponse]:
+        target_head_message_id = head_message_id if head_message_id is not None else branch.head_message_id
+        if not target_head_message_id:
+            return []
+
+        cached_path = self._get_valid_cached_path(conversation, branch, target_head_message_id)
+        if cached_path is None:
+            source_messages = self.flatten_from_message_id(conversation, target_head_message_id)
+            return [self._node_to_visible_message(message) for message in source_messages]
+
+        visible_messages: list[VisibleMessageResponse] = []
+        summary_index = 0
+        for entry in cached_path:
+            node_id = str(entry.get("node_id", ""))
+            role = str(entry.get("role", "assistant"))
+            content = str(entry.get("content", ""))
+            timestamp_value = entry.get("timestamp")
+            timestamp = int(timestamp_value) if isinstance(timestamp_value, (int, float)) else None
+            if role == "summary" or not node_id:
+                visible_messages.append(
+                    VisibleMessageResponse(
+                        virtual_id=f"summary:{branch.branch_id}:{target_head_message_id}:{summary_index}",
+                        kind="summary",
+                        role="summary",
+                        content=content,
+                        source_node_id=None,
+                        timestamp=timestamp,
+                    )
+                )
+                summary_index += 1
+                continue
+
+            visible_messages.append(
+                VisibleMessageResponse(
+                    virtual_id=node_id,
+                    kind="node",
+                    role=role,
+                    content=content,
+                    source_node_id=node_id,
+                    timestamp=timestamp,
+                )
+            )
+        return visible_messages
+
+    def _node_to_visible_message(self, message: ChatMessageRecord) -> VisibleMessageResponse:
+        return VisibleMessageResponse(
+            virtual_id=message.message_id,
+            kind="node",
+            role=message.role,
+            content=message.content_text,
+            source_node_id=message.message_id,
+            timestamp=_to_millis(message.created_at),
+        )
+
+    def _walk_to_context_messages(
+        self,
+        conversation: ChatConversation,
+        head_message_id: str,
+    ) -> list[ChatMessage]:
+        source_messages = self.flatten_from_message_id(conversation, head_message_id)
         completed_history: list[ChatMessage] = []
         for message in source_messages:
             if message.archived or message.status != "completed":
                 continue
-            if message.role == "summary":
-                completed_history.append(ChatMessage(role="system", content=message.content_text))
-                continue
-            if message.role in {"assistant", "system", "tool", "user"}:
-                completed_history.append(ChatMessage(role=message.role, content=message.content_text))
+            role = "system" if message.role == "summary" else message.role
+            if role in {"assistant", "system", "tool", "user"}:
+                completed_history.append(ChatMessage(role=role, content=message.content_text))
         return completed_history
 
     def _estimate_message_tokens(self, message: ChatMessageRecord) -> int:
@@ -651,68 +822,6 @@ class ChatSessionService:
             compression_ratio=LARGE_CONTEXT_PROFILE.compression_ratio,
         )
 
-    def _is_compression_anchor(
-        self,
-        message: ChatMessageRecord,
-        *,
-        path_index: int,
-    ) -> bool:
-        return path_index == 0 or message.pinned or message.role == "summary"
-
-    def _select_compression_segment(
-        self,
-        path: Sequence[ChatMessageRecord],
-        compression_ratio: float,
-    ) -> CompressionSegment | None:
-        if len(path) <= 1:
-            return None
-
-        target_count = min(len(path) - 1, max(1, math.ceil(len(path) * compression_ratio)))
-        if target_count <= 0:
-            return None
-
-        segments: list[CompressionSegment] = []
-        current_nodes: list[ChatMessageRecord] = []
-        current_start: int | None = None
-
-        for index, message in enumerate(path[:target_count]):
-            if self._is_compression_anchor(message, path_index=index):
-                if current_nodes:
-                    segments.append(
-                        CompressionSegment(
-                            nodes=tuple(current_nodes),
-                            start_index=current_start or 0,
-                            end_index=index - 1,
-                        )
-                    )
-                    current_nodes = []
-                    current_start = None
-                continue
-
-            if current_start is None:
-                current_start = index
-            current_nodes.append(message)
-
-        if current_nodes:
-            segments.append(
-                CompressionSegment(
-                    nodes=tuple(current_nodes),
-                    start_index=current_start or 0,
-                    end_index=(current_start or 0) + len(current_nodes) - 1,
-                )
-            )
-
-        if not segments:
-            return None
-
-        return max(
-            segments,
-            key=lambda segment: (
-                sum(self._estimate_message_tokens(message) for message in segment.nodes),
-                -segment.start_index,
-            ),
-        )
-
     def _build_summary_text(self, nodes: Sequence[ChatMessageRecord]) -> str:
         role_labels = {
             "assistant": "助手",
@@ -737,54 +846,203 @@ class ChatSessionService:
 
         return "\n".join(lines)
 
-    def _maybe_compress_context(
+    def prepare_context(
         self,
         conversation: ChatConversation,
+        branch: ChatBranch,
         *,
         head_message_id: str | None,
         model: str,
     ) -> list[ChatMessage]:
-        path = self.flatten_from_message_id(conversation, head_message_id)
-        if len(path) <= 1:
-            return self._records_to_completed_history(path)
-
+        if not head_message_id:
+            return []
         profile = self._resolve_compression_profile(model)
-        total_tokens = sum(self._estimate_message_tokens(message) for message in path)
+        completed_history = self.build_context_view(conversation, branch, head_message_id=head_message_id)
+        total_tokens = sum(approximate_tokens(str(message.content or "").strip()) + 4 for message in completed_history)
         trigger_tokens = int(profile.window_tokens * profile.trigger_ratio)
         if total_tokens < trigger_tokens:
-            return self._records_to_completed_history(path)
+            return completed_history
 
-        segment = self._select_compression_segment(path, profile.compression_ratio)
-        if segment is None:
-            return self._records_to_completed_history(path)
-
-        anchor_node = path[segment.start_index - 1] if segment.start_index > 0 else None
-        first_survivor_index = segment.end_index + 1
-        if first_survivor_index >= len(path):
-            return self._records_to_completed_history(path)
-
-        summary_node = ChatMessageRecord(
-            message_id=_next_message_id(),
-            seq=conversation.message_count + 1,
-            role="summary",
-            content_text=self._build_summary_text(segment.nodes),
-            parent_message_id=anchor_node.message_id if anchor_node else None,
-            status="completed",
-            pinned=True,
-            archived=False,
-            stale=False,
+        self.compress_context(
+            conversation,
+            branch,
+            head_message_id=head_message_id,
+            compression_ratio=profile.compression_ratio,
         )
-        conversation.messages.append(summary_node)
-        conversation.message_count += 1
+        return self.build_context_view(conversation, branch, head_message_id=head_message_id)
 
-        first_survivor = path[first_survivor_index]
-        first_survivor.parent_message_id = summary_node.message_id
+    def compress_context(
+        self,
+        conversation: ChatConversation,
+        branch: ChatBranch,
+        *,
+        head_message_id: str,
+        compression_ratio: float,
+    ) -> None:
+        full_path = self._walk_to_nodes(conversation, head_message_id)
+        if len(full_path) <= 1:
+            return
 
-        for node in segment.nodes:
-            node.archived = True
+        compress_start: int | None = None
+        compress_end: int | None = None
+        for index, node in enumerate(full_path):
+            if node.pinned or node.role == "summary":
+                if compress_start is not None:
+                    break
+                continue
+            if compress_start is None:
+                compress_start = index
+            compress_end = index
 
-        compressed_path = self.flatten_from_message_id(conversation, head_message_id)
-        return self._records_to_completed_history(compressed_path)
+        if compress_start is None or compress_end is None:
+            return
+
+        compressible_count = compress_end - compress_start + 1
+        cut = max(1, math.ceil(compressible_count * compression_ratio))
+        actual_end = min(len(full_path), compress_start + cut)
+        to_compress = full_path[compress_start:actual_end]
+        if not to_compress:
+            return
+
+        cached_path: list[dict[str, object]] = []
+        for node in full_path[:compress_start]:
+            cached_path.append(self._cached_path_entry_for_node(node))
+
+        cached_path.append(
+            {
+                "node_id": "",
+                "role": "summary",
+                "content": self._build_summary_text(to_compress),
+                "version": 0,
+                "timestamp": _to_millis(to_compress[-1].created_at),
+            }
+        )
+
+        for node in full_path[actual_end:]:
+            cached_path.append(self._cached_path_entry_for_node(node))
+
+        branch.compressed_path_json = json.dumps(cached_path, ensure_ascii=False)
+        branch.compressed_at_head_message_id = head_message_id
+        branch.compressed_source_versions_json = json.dumps(
+            {node.message_id: _message_version(node) for node in to_compress},
+            ensure_ascii=False,
+        )
+
+    def _cached_path_entry_for_node(self, message: ChatMessageRecord) -> dict[str, object]:
+        return {
+            "node_id": message.message_id,
+            "role": message.role,
+            "content": message.content_text,
+            "version": _message_version(message),
+            "timestamp": _to_millis(message.created_at),
+        }
+
+    def _get_valid_cached_path(
+        self,
+        conversation: ChatConversation,
+        branch: ChatBranch,
+        head_message_id: str,
+    ) -> list[dict[str, object]] | None:
+        if not branch.compressed_path_json:
+            return None
+        if branch.compressed_at_head_message_id != head_message_id:
+            self._invalidate_branch_cache(branch)
+            return None
+
+        try:
+            cached_path = json.loads(branch.compressed_path_json)
+        except json.JSONDecodeError:
+            self._invalidate_branch_cache(branch)
+            return None
+
+        if not isinstance(cached_path, list):
+            self._invalidate_branch_cache(branch)
+            return None
+
+        node_store = self.build_message_store(conversation)
+        if not self._survivors_valid(node_store, cached_path):
+            self._invalidate_branch_cache(branch)
+            return None
+
+        if branch.compressed_source_versions_json:
+            try:
+                source_versions = json.loads(branch.compressed_source_versions_json)
+            except json.JSONDecodeError:
+                self._invalidate_branch_cache(branch)
+                return None
+            if not isinstance(source_versions, dict) or not self._sources_valid(node_store, source_versions):
+                self._invalidate_branch_cache(branch)
+                return None
+
+        return cached_path
+
+    def _survivors_valid(
+        self,
+        node_store: dict[str, ChatMessageRecord],
+        cached_path: Sequence[dict[str, object]],
+    ) -> bool:
+        for entry in cached_path:
+            node_id = str(entry.get("node_id", ""))
+            if not node_id:
+                continue
+            node = node_store.get(node_id)
+            if node is None:
+                return False
+            cached_version = entry.get("version", -1)
+            if not isinstance(cached_version, (int, float, str)):
+                return False
+            if _message_version(node) != int(cached_version):
+                return False
+        return True
+
+    def _sources_valid(
+        self,
+        node_store: dict[str, ChatMessageRecord],
+        source_versions: dict[str, object],
+    ) -> bool:
+        for node_id, cached_version in source_versions.items():
+            node = node_store.get(str(node_id))
+            if node is None:
+                return False
+            if not isinstance(cached_version, (int, float, str)):
+                return False
+            if _message_version(node) != int(cached_version):
+                return False
+        return True
+
+    def _invalidate_branch_cache(self, branch: ChatBranch) -> None:
+        branch.compressed_path_json = None
+        branch.compressed_at_head_message_id = None
+        branch.compressed_source_versions_json = None
+
+    def _append_message_to_branch_cache(
+        self,
+        branch: ChatBranch,
+        message: ChatMessageRecord,
+    ) -> None:
+        if not branch.compressed_path_json or not message.parent_message_id:
+            return
+        if branch.compressed_at_head_message_id != message.parent_message_id:
+            return
+        try:
+            cached_path = json.loads(branch.compressed_path_json)
+        except json.JSONDecodeError:
+            self._invalidate_branch_cache(branch)
+            return
+        if not isinstance(cached_path, list):
+            self._invalidate_branch_cache(branch)
+            return
+
+        cached_path.append(self._cached_path_entry_for_node(message))
+        branch.compressed_path_json = json.dumps(cached_path, ensure_ascii=False)
+        branch.compressed_at_head_message_id = message.message_id
+
+    def _walk_to_nodes(
+        self,
+        conversation: ChatConversation,
+        head_message_id: str,
+    ) -> list[ChatMessageRecord]:
+        return self.flatten_from_message_id(conversation, head_message_id)
 
     def _resolve_branch_name(self, conversation: ChatConversation, name: str | None) -> str:
         normalized_name = " ".join((name or "").strip().split())
@@ -828,15 +1086,122 @@ class ChatSessionService:
         conversation.last_message_role = head_message.role
         conversation.last_message_at = head_message.created_at
 
+    def _message_has_visible_children(
+        self,
+        conversation: ChatConversation,
+        message_id: str,
+    ) -> bool:
+        return any(
+            message.parent_message_id == message_id and not message.archived
+            for message in conversation.messages
+        )
+
+    def _build_branch_base_message_id(
+        self,
+        conversation: ChatConversation,
+        message_id: str,
+    ) -> str:
+        flattened_path = self.flatten_from_message_id(conversation, message_id)
+        if flattened_path:
+            return flattened_path[0].message_id
+        return message_id
+
+    def _create_edited_message_variant(
+        self,
+        conversation: ChatConversation,
+        source_message: ChatMessageRecord,
+        content: str,
+    ) -> ChatMessageRecord:
+        edited_message = ChatMessageRecord(
+            message_id=_next_message_id(),
+            seq=conversation.message_count + 1,
+            role=source_message.role,
+            content_text=content,
+            parent_message_id=source_message.parent_message_id,
+            modified_from_message_id=source_message.message_id,
+            pinned=source_message.pinned,
+            archived=False,
+            stale=False,
+            status="completed",
+        )
+        conversation.messages.append(edited_message)
+        conversation.message_count += 1
+        return edited_message
+
+    async def _branch_from_non_leaf_edit(
+        self,
+        db: Session,
+        conversation: ChatConversation,
+        source_message: ChatMessageRecord,
+        content: str,
+        config: ChatConversationConfig,
+        *,
+        auto_generate_user_reply: bool,
+    ) -> ChatBranch:
+        edited_message = self._create_edited_message_variant(conversation, source_message, content)
+        branch = ChatBranch(
+            branch_id=_next_branch_id(),
+            name=self._resolve_branch_name(conversation, None),
+            head_message_id=edited_message.message_id,
+            base_message_id=self._build_branch_base_message_id(conversation, edited_message.message_id),
+        )
+        conversation.branches.append(branch)
+        conversation.active_branch_id = branch.branch_id
+        conversation.draft_config = _normalize_config(config)
+        branched_at = _now()
+        conversation.last_message_preview = _message_preview(edited_message.content_text)
+        conversation.last_message_role = edited_message.role
+        conversation.last_message_at = branched_at
+        conversation.updated_at = branched_at
+
+        if auto_generate_user_reply and edited_message.role == "user":
+            assistant_message = ChatMessageRecord(
+                message_id=_next_message_id(),
+                seq=conversation.message_count + 1,
+                role="assistant",
+                content_text="",
+                parent_message_id=edited_message.message_id,
+                status="pending",
+                strategy=config.strategy,
+            )
+            conversation.messages.append(assistant_message)
+            conversation.message_count += 1
+            branch.head_message_id = assistant_message.message_id
+            conversation.last_message_preview = _message_preview(edited_message.content_text)
+            conversation.last_message_role = "user"
+            conversation.last_message_at = branched_at
+
+            completed_history = self.prepare_context(
+                conversation,
+                branch,
+                head_message_id=edited_message.message_id,
+                model=config.model,
+            )
+            db.add(conversation)
+            db.commit()
+
+            await self._complete_assistant_generation(
+                db,
+                conversation,
+                branch,
+                assistant_message,
+                config,
+                completed_history,
+            )
+            return branch
+
+        return branch
+
     def _apply_message_edits(
         self,
         conversation: ChatConversation,
         modified_nodes: Sequence[ChatConversationMessageNodeEdit],
-    ) -> None:
+    ) -> BranchingEdit | None:
         if not modified_nodes:
-            return
+            return None
 
         node_store = self.build_message_store(conversation)
+        branching_edit: BranchingEdit | None = None
 
         for modified_node in modified_nodes:
             node = node_store.get(modified_node.id)
@@ -853,7 +1218,27 @@ class ChatSessionService:
                     detail=f"Message content is required for node {modified_node.id}.",
                 )
 
+            if normalized_content == node.content_text:
+                continue
+
+            if self._message_has_visible_children(conversation, node.message_id):
+                if branching_edit is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail="Only one non-leaf message edit can be committed at a time.",
+                    )
+                if len(modified_nodes) > 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail="Non-leaf edits must be committed on their own.",
+                    )
+                branching_edit = BranchingEdit(content=normalized_content, source_message=node)
+                continue
+
             node.content_text = normalized_content
+            node.version = _message_version(node) + 1
+
+        return branching_edit
 
     def _select_branch(
         self,

@@ -378,8 +378,22 @@ def test_ensure_schema_compatibility_backfills_chat_graph_columns_and_main_branc
     branch_columns = {column["name"] for column in inspector.get_columns("chat_branches")}
 
     assert "active_branch_id" in conversation_columns
-    assert {"parent_message_id", "modified_from_message_id", "pinned", "archived", "stale"} <= message_columns
-    assert {"branch_id", "head_message_id", "base_message_id"} <= branch_columns
+    assert {
+        "parent_message_id",
+        "modified_from_message_id",
+        "pinned",
+        "archived",
+        "stale",
+        "version",
+    } <= message_columns
+    assert {
+        "branch_id",
+        "head_message_id",
+        "base_message_id",
+        "compressed_path_json",
+        "compressed_at_head_message_id",
+        "compressed_source_versions_json",
+    } <= branch_columns
 
     with engine.begin() as connection:
         messages = connection.execute(

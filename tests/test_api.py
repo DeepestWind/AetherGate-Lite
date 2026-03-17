@@ -357,14 +357,19 @@ def test_chat_conversation_persists_messages_and_config(client, auth_headers, mo
     assert final_list_response.json() == []
 
 
-def test_chat_conversation_commit_edits_updates_history_before_generation(
+def test_chat_conversation_commit_edits_branch_from_non_leaf_user_before_generation(
     client, auth_headers, monkeypatch
 ):
     captured_calls = []
 
     async def fake_chat(self, endpoint, messages, temperature, max_tokens):
         captured_calls.append([(message.role, message.content) for message in messages])
-        reply = "初始回复" if len(captured_calls) == 1 else "基于改写后的上下文继续回复"
+        if len(captured_calls) == 1:
+            reply = "初始回复"
+        elif len(captured_calls) == 2:
+            reply = "改写后的首轮回复"
+        else:
+            reply = "基于改写分支继续回复"
         return ProviderChatResult(
             content=reply,
             finish_reason="stop",
@@ -417,6 +422,7 @@ def test_chat_conversation_commit_edits_updates_history_before_generation(
     assert first_send_response.status_code == 200
     first_payload = first_send_response.json()
     original_user_id = first_payload["messages"][0]["id"]
+    original_assistant_id = first_payload["messages"][1]["id"]
 
     second_send_response = client.post(
         f"/api/chat/conversations/{conversation_id}/messages/commit",
@@ -435,7 +441,7 @@ def test_chat_conversation_commit_edits_updates_history_before_generation(
     assert second_send_response.status_code == 200
 
     second_payload = second_send_response.json()
-    assert second_payload["message_count"] == 4
+    assert second_payload["message_count"] == 6
     assert [message["role"] for message in second_payload["messages"]] == [
         "user",
         "assistant",
@@ -443,14 +449,102 @@ def test_chat_conversation_commit_edits_updates_history_before_generation(
         "assistant",
     ]
     assert second_payload["messages"][0]["content"] == "改写后的问题"
-    assert second_payload["message_nodes"][original_user_id]["content"] == "改写后的问题"
+    assert second_payload["messages"][0]["id"] != original_user_id
+    assert second_payload["messages"][0]["modified_from"] == original_user_id
+    assert second_payload["messages"][1]["content"] == "改写后的首轮回复"
     assert second_payload["messages"][2]["content"] == "继续分析"
-    assert second_payload["messages"][3]["content"] == "基于改写后的上下文继续回复"
-    assert captured_calls[-1] == [
+    assert second_payload["messages"][3]["content"] == "基于改写分支继续回复"
+    assert second_payload["message_nodes"][original_user_id]["content"] == "原始问题"
+    assert second_payload["message_nodes"][original_assistant_id]["content"] == "初始回复"
+    assert len(second_payload["branches"]) == 2
+    assert captured_calls[1] == [("user", "改写后的问题")]
+    assert captured_calls[2] == [
         ("user", "改写后的问题"),
-        ("assistant", "初始回复"),
+        ("assistant", "改写后的首轮回复"),
         ("user", "继续分析"),
     ]
+
+
+def test_chat_conversation_branch_edit_non_leaf_user_auto_generates_reply(
+    client, auth_headers, monkeypatch
+):
+    captured_calls = []
+    replies = iter(["原始回复", "改写后的新回复"])
+
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        captured_calls.append([(message.role, message.content) for message in messages])
+        return ProviderChatResult(
+            content=next(replies),
+            finish_reason="stop",
+            prompt_tokens=24,
+            completion_tokens=16,
+            total_tokens=40,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-branch-edit-user-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    first_send_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "原始问题",
+            "draft_config": draft_config,
+        },
+    )
+    assert first_send_response.status_code == 200
+    first_payload = first_send_response.json()
+    original_user_id = first_payload["messages"][0]["id"]
+
+    branch_edit_response = client.post(
+        f"/api/chat/conversations/{conversation_id}/messages/{original_user_id}/branch-edit",
+        headers=auth_headers,
+        json={
+            "content": "改写后的问题",
+            "draft_config": draft_config,
+        },
+    )
+    assert branch_edit_response.status_code == 200
+    branch_edit_payload = branch_edit_response.json()
+
+    assert [message["role"] for message in branch_edit_payload["messages"]] == ["user", "assistant"]
+    assert branch_edit_payload["messages"][0]["content"] == "改写后的问题"
+    assert branch_edit_payload["messages"][0]["id"] != original_user_id
+    assert branch_edit_payload["messages"][0]["modified_from"] == original_user_id
+    assert branch_edit_payload["messages"][1]["content"] == "改写后的新回复"
+    assert branch_edit_payload["message_nodes"][original_user_id]["content"] == "原始问题"
+    assert len(branch_edit_payload["branches"]) == 2
+    assert captured_calls[-1] == [("user", "改写后的问题")]
 
 
 def test_chat_conversation_regenerate_creates_assistant_sibling_and_moves_branch(
@@ -959,19 +1053,19 @@ def test_chat_conversation_compresses_context_with_summary_using_medium_default(
     assert third_send.status_code == 200
     third_payload = third_send.json()
 
-    summary_nodes = [
-        node for node in third_payload["message_nodes"].values() if node["role"] == "summary"
+    summary_messages = [
+        message for message in third_payload["visible_messages"] if message["kind"] == "summary"
     ]
-    assert len(summary_nodes) == 1
-    assert summary_nodes[0]["pinned"] is True
-    assert third_payload["messages"][1]["role"] == "summary"
-
-    archived_assistants = [
-        node
-        for node in third_payload["message_nodes"].values()
-        if node["role"] == "assistant" and node["archived"]
+    assert len(summary_messages) == 1
+    assert summary_messages[0]["role"] == "summary"
+    assert not any(node["role"] == "summary" for node in third_payload["message_nodes"].values())
+    assert [message["role"] for message in third_payload["visible_messages"]] == [
+        "summary",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
     ]
-    assert len(archived_assistants) == 1
     assert any(role == "system" for role, _ in captured_calls[-1])
 
 
@@ -1074,8 +1168,8 @@ def test_chat_conversation_pinned_message_is_excluded_from_compression(
     assert not any(node["role"] == "summary" for node in third_payload["message_nodes"].values())
     assert third_payload["message_nodes"][first_assistant_id]["pinned"] is True
     assert third_payload["message_nodes"][first_assistant_id]["archived"] is False
-    assert [message["role"] for message in third_payload["messages"]] == [
-        "user",
+    assert [message["role"] for message in third_payload["visible_messages"]] == [
+        "summary",
         "assistant",
         "user",
         "assistant",

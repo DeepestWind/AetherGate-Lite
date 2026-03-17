@@ -47,6 +47,9 @@ class ChatBranch(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(80), default="main")
     head_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     base_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    compressed_path_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compressed_at_head_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    compressed_source_versions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     conversation: Mapped[ChatConversation] = relationship(back_populates="branches")
 
@@ -68,6 +71,7 @@ class ChatMessageRecord(TimestampMixin, Base):
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     stale: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="completed", index=True)
     strategy: Mapped[str | None] = mapped_column(String(50), nullable=True)
     request_log_id: Mapped[int | None] = mapped_column(
