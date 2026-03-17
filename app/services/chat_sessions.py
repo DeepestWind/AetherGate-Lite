@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -98,6 +99,31 @@ class BranchingEdit:
     source_message: ChatMessageRecord
 
 
+@dataclass(frozen=True, slots=True)
+class ChatSessionStreamMeta:
+    request_id: str
+    provider: str
+    model: str
+    route_reason: str
+    cache_hit: bool
+    endpoint_id: str
+    fallback_count: int
+    strategy: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChatSessionStreamEvent:
+    kind: str
+    assistant_message_id: str | None = None
+    user_message_id: str | None = None
+    branch_id: str | None = None
+    delta: str | None = None
+    content: str | None = None
+    meta: ChatSessionStreamMeta | None = None
+    conversation: ChatConversation | None = None
+    error_message: str | None = None
+
+
 SMALL_CONTEXT_PROFILE = ContextCompressionProfile(
     window_tokens=128_000,
     trigger_ratio=0.60,
@@ -130,6 +156,7 @@ class ChatSessionService:
     def __init__(self):
         self.repository = ChatConversationRepository()
         self.request_logs = RequestLogRepository()
+        self._active_generations: dict[str, asyncio.Event] = {}
 
     def list_conversations(self, db: Session):
         return self.repository.list(db)
@@ -416,6 +443,197 @@ class ChatSessionService:
         self._sync_active_branch_summary(conversation, branch)
         return self.repository.save(db, conversation)
 
+    def stop_generation(
+        self,
+        db: Session,
+        conversation_id: str,
+        message_id: str,
+    ) -> None:
+        conversation = self.get_conversation(db, conversation_id)
+        node_store = self.build_message_store(conversation)
+        message = node_store.get(message_id)
+        if message is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message node not found: {message_id}",
+            )
+        cancel_event = self._active_generations.get(message_id)
+        if cancel_event is not None:
+            cancel_event.set()
+
+    async def stream_send_message(
+        self,
+        db: Session,
+        conversation_id: str,
+        content: str,
+        config: ChatConversationConfig,
+        *,
+        modified_nodes: Sequence[ChatConversationMessageNodeEdit] | None = None,
+    ) -> AsyncIterator[ChatSessionStreamEvent]:
+        (
+            conversation,
+            branch,
+            user_message,
+            assistant_message,
+            completed_history,
+            _,
+        ) = await self._prepare_send_generation(
+            db,
+            conversation_id,
+            content,
+            config,
+            modified_nodes=modified_nodes,
+        )
+        async for event in self._stream_assistant_generation(
+            db,
+            conversation,
+            branch,
+            assistant_message,
+            config,
+            completed_history,
+            user_message_id=user_message.message_id,
+        ):
+            yield event
+
+    async def stream_edit_message_in_new_branch(
+        self,
+        db: Session,
+        conversation_id: str,
+        message_id: str,
+        content: str,
+        config: ChatConversationConfig,
+    ) -> AsyncIterator[ChatSessionStreamEvent]:
+        conversation = self.get_conversation(db, conversation_id)
+        normalized_content = content.strip()
+        if not normalized_content:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Message content is required.",
+            )
+
+        node_store = self.build_message_store(conversation)
+        source_message = node_store.get(message_id)
+        if source_message is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message node not found: {message_id}",
+            )
+        if source_message.role not in {"assistant", "user"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Only user and assistant messages can be edited into a branch.",
+            )
+        if normalized_content == source_message.content_text:
+            yield ChatSessionStreamEvent(
+                kind="message.completed",
+                conversation=self.get_conversation(db, conversation_id),
+            )
+            return
+        if not self._message_has_visible_children(conversation, source_message.message_id):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Only non-leaf messages can be edited into a new branch.",
+            )
+
+        if source_message.role != "user":
+            await self._branch_from_non_leaf_edit(
+                db,
+                conversation,
+                source_message,
+                normalized_content,
+                config,
+                auto_generate_user_reply=False,
+            )
+            db.add(conversation)
+            db.commit()
+            yield ChatSessionStreamEvent(
+                kind="message.completed",
+                conversation=self.get_conversation(db, conversation_id),
+            )
+            return
+
+        edited_message = self._create_edited_message_variant(conversation, source_message, normalized_content)
+        branch = ChatBranch(
+            branch_id=_next_branch_id(),
+            name=self._resolve_branch_name(conversation, None),
+            head_message_id=None,
+            base_message_id=self._build_branch_base_message_id(conversation, edited_message.message_id),
+        )
+        assistant_message = ChatMessageRecord(
+            message_id=_next_message_id(),
+            seq=conversation.message_count + 1,
+            role="assistant",
+            content_text="",
+            parent_message_id=edited_message.message_id,
+            status="pending",
+            strategy=config.strategy,
+        )
+        branch.head_message_id = assistant_message.message_id
+        conversation.branches.append(branch)
+        conversation.messages.append(assistant_message)
+        conversation.message_count += 1
+        conversation.active_branch_id = branch.branch_id
+        conversation.draft_config = _normalize_config(config)
+        branched_at = _now()
+        conversation.last_message_preview = _message_preview(edited_message.content_text)
+        conversation.last_message_role = "user"
+        conversation.last_message_at = branched_at
+        conversation.updated_at = branched_at
+        completed_history = self.prepare_context(
+            conversation,
+            branch,
+            head_message_id=edited_message.message_id,
+            model=config.model,
+        )
+        db.add(conversation)
+        db.commit()
+
+        async for event in self._stream_assistant_generation(
+            db,
+            conversation,
+            branch,
+            assistant_message,
+            config,
+            completed_history,
+            user_message_id=edited_message.message_id,
+        ):
+            yield event
+
+    async def stream_regenerate_message(
+        self,
+        db: Session,
+        conversation_id: str,
+        message_id: str,
+        config: ChatConversationConfig,
+        *,
+        modified_nodes: Sequence[ChatConversationMessageNodeEdit] | None = None,
+    ) -> AsyncIterator[ChatSessionStreamEvent]:
+        (
+            conversation,
+            branch,
+            assistant_message,
+            completed_history,
+            move_branch_head,
+        ) = self._prepare_regeneration(
+            db,
+            conversation_id,
+            message_id,
+            config,
+            modified_nodes=modified_nodes,
+        )
+        async for event in self._stream_assistant_generation(
+            db,
+            conversation,
+            branch,
+            assistant_message,
+            config,
+            completed_history,
+            user_message_id=assistant_message.parent_message_id,
+            disable_cache=True,
+            move_branch_head=move_branch_head,
+        ):
+            yield event
+
     async def send_message(
         self,
         db: Session,
@@ -425,6 +643,108 @@ class ChatSessionService:
         *,
         modified_nodes: Sequence[ChatConversationMessageNodeEdit] | None = None,
     ) -> ChatConversation:
+        conversation, branch, _, assistant_message, completed_history, _ = await self._prepare_send_generation(
+            db,
+            conversation_id,
+            content,
+            config,
+            modified_nodes=modified_nodes,
+        )
+
+        await self._complete_assistant_generation(
+            db,
+            conversation,
+            branch,
+            assistant_message,
+            config,
+            completed_history,
+        )
+
+        return self.get_conversation(db, conversation_id)
+
+    async def regenerate_message(
+        self,
+        db: Session,
+        conversation_id: str,
+        message_id: str,
+        config: ChatConversationConfig,
+        *,
+        modified_nodes: Sequence[ChatConversationMessageNodeEdit] | None = None,
+    ) -> ChatConversation:
+        (
+            conversation,
+            branch,
+            assistant_message,
+            completed_history,
+            move_branch_head,
+        ) = self._prepare_regeneration(
+            db,
+            conversation_id,
+            message_id,
+            config,
+            modified_nodes=modified_nodes,
+        )
+
+        await self._complete_assistant_generation(
+            db,
+            conversation,
+            branch,
+            assistant_message,
+            config,
+            completed_history,
+            disable_cache=True,
+            move_branch_head=move_branch_head,
+        )
+
+        return self.get_conversation(db, conversation_id)
+
+    def select_message_variant(
+        self,
+        db: Session,
+        conversation_id: str,
+        message_id: str,
+    ) -> ChatConversation:
+        conversation = self.get_conversation(db, conversation_id)
+        branch = self._get_or_create_active_branch(conversation)
+        node_store = self.build_message_store(conversation)
+        target_message = node_store.get(message_id)
+        if target_message is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message node not found: {message_id}",
+            )
+        if target_message.role != "assistant":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Only assistant messages can be selected as reply variants.",
+            )
+
+        branch.head_message_id = target_message.message_id
+        if branch.base_message_id is None:
+            flattened_path = self.flatten_from_message_id(conversation, target_message.message_id)
+            branch.base_message_id = flattened_path[0].message_id if flattened_path else target_message.message_id
+        conversation.last_message_preview = _message_preview(target_message.content_text)
+        conversation.last_message_role = target_message.role
+        conversation.last_message_at = target_message.created_at
+        conversation.updated_at = _now()
+        return self.repository.save(db, conversation)
+
+    async def _prepare_send_generation(
+        self,
+        db: Session,
+        conversation_id: str,
+        content: str,
+        config: ChatConversationConfig,
+        *,
+        modified_nodes: Sequence[ChatConversationMessageNodeEdit] | None = None,
+    ) -> tuple[
+        ChatConversation,
+        ChatBranch,
+        ChatMessageRecord,
+        ChatMessageRecord,
+        list[ChatMessage],
+        bool,
+    ]:
         conversation = self.get_conversation(db, conversation_id)
         normalized_content = content.strip()
         if not normalized_content:
@@ -474,7 +794,6 @@ class ChatSessionService:
         conversation.last_message_role = "user"
         conversation.last_message_at = sent_at
         conversation.updated_at = sent_at
-
         completed_history = self.prepare_context(
             conversation,
             branch,
@@ -483,19 +802,9 @@ class ChatSessionService:
         )
         db.add(conversation)
         db.commit()
+        return conversation, branch, user_message, assistant_message, completed_history, True
 
-        await self._complete_assistant_generation(
-            db,
-            conversation,
-            branch,
-            assistant_message,
-            config,
-            completed_history,
-        )
-
-        return self.get_conversation(db, conversation_id)
-
-    async def regenerate_message(
+    def _prepare_regeneration(
         self,
         db: Session,
         conversation_id: str,
@@ -503,7 +812,13 @@ class ChatSessionService:
         config: ChatConversationConfig,
         *,
         modified_nodes: Sequence[ChatConversationMessageNodeEdit] | None = None,
-    ) -> ChatConversation:
+    ) -> tuple[
+        ChatConversation,
+        ChatBranch,
+        ChatMessageRecord,
+        list[ChatMessage],
+        bool,
+    ]:
         conversation = self.get_conversation(db, conversation_id)
         branch = self._get_or_create_active_branch(conversation)
         branching_edit = self._apply_message_edits(conversation, modified_nodes or [])
@@ -531,7 +846,6 @@ class ChatSessionService:
                 detail="Assistant message must have a parent node to regenerate.",
             )
         move_branch_head = branch.head_message_id == source_message.message_id
-
         assistant_message = ChatMessageRecord(
             message_id=_next_message_id(),
             seq=conversation.message_count + 1,
@@ -558,7 +872,6 @@ class ChatSessionService:
             conversation.updated_at = sent_at
         else:
             self._sync_active_branch_summary(conversation, branch)
-
         completed_history = self.prepare_context(
             conversation,
             branch,
@@ -567,50 +880,192 @@ class ChatSessionService:
         )
         db.add(conversation)
         db.commit()
+        return conversation, branch, assistant_message, completed_history, move_branch_head
 
-        await self._complete_assistant_generation(
-            db,
-            conversation,
-            branch,
-            assistant_message,
-            config,
-            completed_history,
-            disable_cache=True,
-            move_branch_head=move_branch_head,
-        )
-
-        return self.get_conversation(db, conversation_id)
-
-    def select_message_variant(
+    async def _stream_assistant_generation(
         self,
         db: Session,
-        conversation_id: str,
-        message_id: str,
-    ) -> ChatConversation:
-        conversation = self.get_conversation(db, conversation_id)
-        branch = self._get_or_create_active_branch(conversation)
-        node_store = self.build_message_store(conversation)
-        target_message = node_store.get(message_id)
-        if target_message is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Message node not found: {message_id}",
-            )
-        if target_message.role != "assistant":
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Only assistant messages can be selected as reply variants.",
-            )
+        conversation: ChatConversation,
+        branch: ChatBranch,
+        assistant_message: ChatMessageRecord,
+        config: ChatConversationConfig,
+        completed_history: Sequence[ChatMessage],
+        *,
+        user_message_id: str | None = None,
+        disable_cache: bool = False,
+        move_branch_head: bool = True,
+    ) -> AsyncIterator[ChatSessionStreamEvent]:
+        cancel_event = asyncio.Event()
+        self._active_generations[assistant_message.message_id] = cancel_event
+        yield ChatSessionStreamEvent(
+            kind="message.created",
+            assistant_message_id=assistant_message.message_id,
+            user_message_id=user_message_id,
+            branch_id=branch.branch_id,
+        )
 
-        branch.head_message_id = target_message.message_id
-        if branch.base_message_id is None:
-            flattened_path = self.flatten_from_message_id(conversation, target_message.message_id)
-            branch.base_message_id = flattened_path[0].message_id if flattened_path else target_message.message_id
-        conversation.last_message_preview = _message_preview(target_message.content_text)
-        conversation.last_message_role = target_message.role
-        conversation.last_message_at = target_message.created_at
-        conversation.updated_at = _now()
-        return self.repository.save(db, conversation)
+        gateway_request = ChatCompletionRequest(
+            model=config.model.strip(),
+            messages=list(completed_history),
+            temperature=config.temperature,
+            prompt_id=config.prompt_id.strip() or None,
+            prompt_variables=config.variables,
+            strategy=config.strategy,
+            disable_cache=disable_cache,
+            stream=True,
+        )
+
+        try:
+            stream_session = await gateway_service.begin_chat_stream(
+                db,
+                gateway_request,
+                cancel_event=cancel_event,
+            )
+        except HTTPException as exc:
+            request_id = exc.headers.get("X-Request-ID") if exc.headers else None
+            request_log = self.request_logs.get_by_request_id(db, request_id) if request_id else None
+            error_message = _stringify_error(exc.detail)
+            final_conversation = self._finalize_assistant_generation_state(
+                db,
+                conversation,
+                branch,
+                assistant_message,
+                content=f"调用失败：{error_message}",
+                status="error",
+                finish_reason="error",
+                request_log_id=request_log.id if request_log else None,
+                error_message=error_message,
+                move_branch_head=move_branch_head,
+            )
+            yield ChatSessionStreamEvent(
+                kind="message.error",
+                assistant_message_id=assistant_message.message_id,
+                error_message=error_message,
+                conversation=final_conversation,
+            )
+            self._active_generations.pop(assistant_message.message_id, None)
+            return
+
+        yield ChatSessionStreamEvent(
+            kind="message.meta",
+            assistant_message_id=assistant_message.message_id,
+            meta=ChatSessionStreamMeta(
+                request_id=stream_session.call_info.request_id,
+                provider=stream_session.call_info.provider,
+                model=stream_session.call_info.model,
+                route_reason=stream_session.call_info.route_reason,
+                cache_hit=stream_session.call_info.cache_hit,
+                endpoint_id=stream_session.call_info.endpoint_id,
+                fallback_count=stream_session.call_info.fallback_count,
+                strategy=stream_session.call_info.strategy,
+            ),
+        )
+
+        try:
+            async for result in gateway_service.iterate_chat_stream(db, stream_session):
+                if result.kind == "delta":
+                    assistant_message.content_text = result.content
+                    yield ChatSessionStreamEvent(
+                        kind="message.delta",
+                        assistant_message_id=assistant_message.message_id,
+                        delta=result.delta,
+                        content=result.content,
+                    )
+                    continue
+
+                if result.kind == "completed":
+                    final_conversation = self._finalize_assistant_generation_state(
+                        db,
+                        conversation,
+                        branch,
+                        assistant_message,
+                        content=result.content,
+                        status="completed",
+                        finish_reason=result.finish_reason or "stop",
+                        request_log_id=result.request_log_id,
+                        error_message=None,
+                        move_branch_head=move_branch_head,
+                    )
+                    yield ChatSessionStreamEvent(
+                        kind="message.completed",
+                        assistant_message_id=assistant_message.message_id,
+                        conversation=final_conversation,
+                    )
+                    continue
+
+                if result.kind == "cancelled":
+                    final_conversation = self._finalize_assistant_generation_state(
+                        db,
+                        conversation,
+                        branch,
+                        assistant_message,
+                        content=result.content,
+                        status="stopped",
+                        finish_reason="cancelled",
+                        request_log_id=result.request_log_id,
+                        error_message=None,
+                        move_branch_head=move_branch_head,
+                    )
+                    yield ChatSessionStreamEvent(
+                        kind="message.stopped",
+                        assistant_message_id=assistant_message.message_id,
+                        conversation=final_conversation,
+                    )
+                    continue
+
+                error_content = result.content or f"调用失败：{result.error_message or '未知错误'}"
+                final_conversation = self._finalize_assistant_generation_state(
+                    db,
+                    conversation,
+                    branch,
+                    assistant_message,
+                    content=error_content,
+                    status="error",
+                    finish_reason="error",
+                    request_log_id=result.request_log_id,
+                    error_message=result.error_message,
+                    move_branch_head=move_branch_head,
+                )
+                yield ChatSessionStreamEvent(
+                    kind="message.error",
+                    assistant_message_id=assistant_message.message_id,
+                    error_message=result.error_message,
+                    conversation=final_conversation,
+                )
+        finally:
+            self._active_generations.pop(assistant_message.message_id, None)
+
+    def _finalize_assistant_generation_state(
+        self,
+        db: Session,
+        conversation: ChatConversation,
+        branch: ChatBranch,
+        assistant_message: ChatMessageRecord,
+        *,
+        content: str,
+        status: str,
+        finish_reason: str,
+        request_log_id: int | None,
+        error_message: str | None,
+        move_branch_head: bool,
+    ) -> ChatConversation:
+        assistant_message.content_text = content
+        assistant_message.version = _message_version(assistant_message) + 1
+        assistant_message.status = status
+        assistant_message.finish_reason = finish_reason
+        assistant_message.request_log_id = request_log_id
+        assistant_message.error_message = error_message
+        completed_at = _now()
+        conversation.updated_at = completed_at
+        if move_branch_head:
+            self._append_message_to_branch_cache(branch, assistant_message)
+            conversation.last_message_preview = _message_preview(assistant_message.content_text)
+            conversation.last_message_role = "assistant"
+            conversation.last_message_at = completed_at
+            branch.head_message_id = assistant_message.message_id
+        db.add(conversation)
+        db.commit()
+        return self.get_conversation(db, conversation.conversation_id)
 
     async def _complete_assistant_generation(
         self,
@@ -637,42 +1092,34 @@ class ChatSessionService:
 
         try:
             result = await gateway_service.handle_chat(db, gateway_request)
-            assistant_message.content_text = result.response.choices[0].message.content
-            assistant_message.version = _message_version(assistant_message) + 1
-            assistant_message.status = "completed"
-            assistant_message.finish_reason = result.response.choices[0].finish_reason
-            assistant_message.request_log_id = result.request_log_id
-            assistant_message.error_message = None
-            completed_at = _now()
-            conversation.updated_at = completed_at
-            if move_branch_head:
-                self._append_message_to_branch_cache(branch, assistant_message)
-                conversation.last_message_preview = _message_preview(assistant_message.content_text)
-                conversation.last_message_role = "assistant"
-                conversation.last_message_at = completed_at
-                branch.head_message_id = assistant_message.message_id
-            db.add(conversation)
-            db.commit()
+            self._finalize_assistant_generation_state(
+                db,
+                conversation,
+                branch,
+                assistant_message,
+                content=result.response.choices[0].message.content,
+                status="completed",
+                finish_reason=result.response.choices[0].finish_reason,
+                request_log_id=result.request_log_id,
+                error_message=None,
+                move_branch_head=move_branch_head,
+            )
         except HTTPException as exc:
             request_id = exc.headers.get("X-Request-ID") if exc.headers else None
             request_log = self.request_logs.get_by_request_id(db, request_id) if request_id else None
             error_message = _stringify_error(exc.detail)
-            assistant_message.content_text = f"调用失败：{error_message}"
-            assistant_message.version = _message_version(assistant_message) + 1
-            assistant_message.status = "error"
-            assistant_message.finish_reason = "error"
-            assistant_message.request_log_id = request_log.id if request_log else None
-            assistant_message.error_message = error_message
-            completed_at = _now()
-            conversation.updated_at = completed_at
-            if move_branch_head:
-                self._append_message_to_branch_cache(branch, assistant_message)
-                conversation.last_message_preview = _message_preview(assistant_message.content_text)
-                conversation.last_message_role = "assistant"
-                conversation.last_message_at = completed_at
-                branch.head_message_id = assistant_message.message_id
-            db.add(conversation)
-            db.commit()
+            self._finalize_assistant_generation_state(
+                db,
+                conversation,
+                branch,
+                assistant_message,
+                content=f"调用失败：{error_message}",
+                status="error",
+                finish_reason="error",
+                request_log_id=request_log.id if request_log else None,
+                error_message=error_message,
+                move_branch_head=move_branch_head,
+            )
 
     def build_context_view(
         self,

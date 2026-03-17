@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
@@ -39,6 +41,16 @@ class BaseProvider:
     ) -> ProviderChatResult:
         raise NotImplementedError
 
+    async def stream_chat_completions(
+        self,
+        endpoint: ModelEndpoint,
+        messages: list[ChatMessage],
+        temperature: float,
+        max_tokens: int,
+        cancel_event: asyncio.Event | None = None,
+    ) -> AsyncIterator[ProviderStreamEvent]:
+        raise NotImplementedError
+
     async def validate_endpoint(self, endpoint: ModelEndpoint) -> tuple[bool, str]:
         raise NotImplementedError
 
@@ -46,3 +58,12 @@ class BaseProvider:
         settings = get_settings()
         return httpx.AsyncClient(timeout=settings.request_timeout_seconds)
 
+
+@dataclass(slots=True)
+class ProviderStreamEvent:
+    delta: str = ""
+    finish_reason: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    actual_model: str | None = None

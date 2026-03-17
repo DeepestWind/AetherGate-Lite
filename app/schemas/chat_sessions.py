@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 ChatStrategy = Literal["balanced", "cheapest", "quality"]
 ChatMessageRole = Literal["assistant", "summary", "system", "tool", "user"]
-ChatMessageStatus = Literal["completed", "error", "pending"]
+ChatMessageStatus = Literal["completed", "error", "pending", "stopped"]
 VisibleMessageKind = Literal["node", "summary"]
 
 
@@ -32,17 +32,17 @@ class ChatConversationRename(BaseModel):
 
 
 class ChatConversationMessageCreate(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(min_length=1, max_length=32768)
     draft_config: ChatConversationConfig
 
 
 class ChatConversationMessageNodeEdit(BaseModel):
     id: str = Field(min_length=1, max_length=64)
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(min_length=1, max_length=32768)
 
 
 class ChatConversationMessageCommitCreate(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(min_length=1, max_length=32768)
     draft_config: ChatConversationConfig
     modified_nodes: list[ChatConversationMessageNodeEdit] = Field(default_factory=list)
 
@@ -53,7 +53,7 @@ class ChatConversationMessageRegenerateCreate(BaseModel):
 
 
 class ChatConversationMessageBranchEditCreate(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(min_length=1, max_length=32768)
     draft_config: ChatConversationConfig
 
 
@@ -78,7 +78,7 @@ class ChatCallInfoResponse(BaseModel):
     provider: str
     request_id: str
     route_reason: str
-    status: Literal["error", "fallback", "success"]
+    status: Literal["cancelled", "error", "fallback", "success"]
     strategy: ChatStrategy
     total_tokens: int
 

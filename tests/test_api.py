@@ -1,9 +1,43 @@
-from app.providers.base import ProviderCallError, ProviderChatResult
+import asyncio
+import json
+
+from app.db.session import SessionLocal
+from app.providers.base import ProviderCallError, ProviderChatResult, ProviderStreamEvent
 from app.providers.openai_compatible import OpenAICompatibleProvider
+from app.schemas.chat_sessions import ChatConversationConfig
+from app.services.chat_sessions import chat_session_service
 
 
 async def _validate_success(self, endpoint):
     return True, f"{endpoint.name} ok"
+
+
+def _parse_sse_blocks(lines):
+    event_name = None
+    data_lines = []
+
+    for line in lines:
+        if line == "":
+            if data_lines:
+                yield {
+                    "event": event_name,
+                    "data": "\n".join(data_lines),
+                }
+            event_name = None
+            data_lines = []
+            continue
+
+        if line.startswith("event: "):
+            event_name = line[7:]
+            continue
+        if line.startswith("data: "):
+            data_lines.append(line[6:])
+
+    if data_lines:
+        yield {
+            "event": event_name,
+            "data": "\n".join(data_lines),
+        }
 
 
 def test_health_endpoint(client):
@@ -1176,6 +1210,214 @@ def test_chat_conversation_pinned_message_is_excluded_from_compression(
         "user",
         "assistant",
     ]
+
+
+def test_gateway_streaming_returns_openai_style_sse(client, auth_headers, monkeypatch):
+    async def fake_stream(self, endpoint, messages, temperature, max_tokens, cancel_event=None):
+        yield ProviderStreamEvent(delta="你好", actual_model=endpoint.model_name)
+        yield ProviderStreamEvent(delta="，世界")
+        yield ProviderStreamEvent(
+            finish_reason="stop",
+            prompt_tokens=10,
+            completion_tokens=4,
+            total_tokens=14,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "stream_chat_completions", fake_stream)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "public-stream-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        headers=auth_headers,
+        json={
+            "model": "gpt-lite",
+            "temperature": 0,
+            "stream": True,
+            "messages": [{"role": "user", "content": "你好"}],
+        },
+    ) as response:
+        assert response.status_code == 200
+        blocks = list(_parse_sse_blocks(response.iter_lines()))
+
+    assert response.headers["x-branchat-cache"] == "miss"
+    assert json.loads(blocks[0]["data"])["choices"][0]["delta"] == {"role": "assistant"}
+    assert json.loads(blocks[1]["data"])["choices"][0]["delta"] == {"content": "你好"}
+    assert json.loads(blocks[2]["data"])["choices"][0]["delta"] == {"content": "，世界"}
+    assert json.loads(blocks[3]["data"])["choices"][0]["finish_reason"] == "stop"
+    assert blocks[4]["data"] == "[DONE]"
+
+
+def test_chat_conversation_streaming_route_emits_sse_events_and_persists(
+    client, auth_headers, monkeypatch
+):
+    async def fake_stream(self, endpoint, messages, temperature, max_tokens, cancel_event=None):
+        yield ProviderStreamEvent(delta="第一段", actual_model=endpoint.model_name)
+        yield ProviderStreamEvent(delta="第二段")
+        yield ProviderStreamEvent(
+            finish_reason="stop",
+            prompt_tokens=12,
+            completion_tokens=6,
+            total_tokens=18,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "stream_chat_completions", fake_stream)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-stream-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    with client.stream(
+        "POST",
+        f"/api/chat/conversations/{conversation_id}/messages/stream",
+        headers=auth_headers,
+        json={
+            "content": "请流式回复",
+            "draft_config": draft_config,
+        },
+    ) as response:
+        assert response.status_code == 200
+        blocks = list(_parse_sse_blocks(response.iter_lines()))
+
+    event_names = [block["event"] for block in blocks]
+    assert event_names == [
+        "message.created",
+        "message.meta",
+        "message.delta",
+        "message.delta",
+        "message.completed",
+    ]
+    assert json.loads(blocks[2]["data"])["delta"] == "第一段"
+    assert json.loads(blocks[3]["data"])["content"] == "第一段第二段"
+
+    completed_payload = json.loads(blocks[4]["data"])
+    conversation = completed_payload["conversation"]
+    assert [message["role"] for message in conversation["messages"]] == ["user", "assistant"]
+    assert conversation["messages"][1]["content"] == "第一段第二段"
+    assert conversation["messages"][1]["status"] == "completed"
+
+    detail_response = client.get(f"/api/chat/conversations/{conversation_id}", headers=auth_headers)
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["messages"][1]["content"] == "第一段第二段"
+    assert detail_payload["messages"][1]["call_info"]["status"] == "success"
+
+
+def test_chat_conversation_stop_generation_marks_message_stopped(client, auth_headers, monkeypatch):
+    async def fake_stream(self, endpoint, messages, temperature, max_tokens, cancel_event=None):
+        yield ProviderStreamEvent(delta="部分回答", actual_model=endpoint.model_name)
+        while cancel_event is None or not cancel_event.is_set():
+            await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "stream_chat_completions", fake_stream)
+
+    endpoint_response = client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "chat-stop-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+    assert endpoint_response.status_code == 201
+
+    draft_config = {
+        "model": "gpt-lite",
+        "prompt_id": "",
+        "strategy": "balanced",
+        "temperature": 0,
+        "variables": {},
+    }
+    create_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={"draft_config": draft_config},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    async def collect_events():
+        events = []
+        assistant_message_id = None
+        with SessionLocal() as db:
+            async for event in chat_session_service.stream_send_message(
+                db,
+                conversation_id,
+                "请在中途停止",
+                ChatConversationConfig.model_validate(draft_config),
+            ):
+                events.append(event)
+                if event.kind == "message.created":
+                    assistant_message_id = event.assistant_message_id
+                if event.kind == "message.delta" and assistant_message_id is not None:
+                    stop_response = client.post(
+                        f"/api/chat/conversations/{conversation_id}/messages/{assistant_message_id}/stop",
+                        headers=auth_headers,
+                    )
+                    assert stop_response.status_code == 204
+        return events
+
+    events = asyncio.run(collect_events())
+    stopped_event = next(event for event in events if event.kind == "message.stopped")
+    assert stopped_event.conversation is not None
+    stopped_messages = stopped_event.conversation.messages
+    assert stopped_messages[0].role == "user"
+    assert stopped_messages[1].content_text == "部分回答"
+    assert stopped_messages[1].status == "stopped"
+
+    detail_response = client.get(f"/api/chat/conversations/{conversation_id}", headers=auth_headers)
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["messages"][1]["content"] == "部分回答"
+    assert detail_payload["messages"][1]["status"] == "stopped"
+    assert detail_payload["messages"][1]["call_info"]["status"] == "cancelled"
 
 
 def test_chat_conversation_can_be_renamed(client, auth_headers):

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -11,8 +13,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.endpoint import ModelEndpoint
 from app.models.request_log import RequestLog
-from app.providers.base import ProviderCallError
+from app.providers.base import ProviderCallError, ProviderStreamEvent
 from app.repositories.endpoints import EndpointRepository
 from app.repositories.request_logs import RequestLogRepository
 from app.schemas.chat import (
@@ -37,6 +40,53 @@ class GatewayResult:
     request_log_id: int | None = None
 
 
+@dataclass(slots=True)
+class GatewayStreamCallInfo:
+    request_id: str
+    provider: str
+    model: str
+    route_reason: str
+    cache_hit: bool
+    endpoint_id: str
+    fallback_count: int
+    strategy: str
+    latency_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    status: str = "success"
+
+
+@dataclass(slots=True)
+class GatewayStreamResult:
+    kind: str
+    call_info: GatewayStreamCallInfo
+    delta: str = ""
+    content: str = ""
+    finish_reason: str | None = None
+    error_message: str | None = None
+    request_log_id: int | None = None
+
+
+@dataclass(slots=True)
+class GatewayStreamSession:
+    request_id: str
+    logical_model: str
+    prompt_id: str | None
+    prompt_blob: str
+    route_reason: str
+    strategy: str
+    endpoint: ModelEndpoint
+    fallback_count: int
+    started_at: float
+    headers: dict[str, str]
+    call_info: GatewayStreamCallInfo
+    iterator: AsyncIterator[ProviderStreamEvent]
+    first_event: ProviderStreamEvent | None
+    cancel_event: asyncio.Event | None = None
+
+
 class GatewayService:
     def __init__(self):
         settings = get_settings()
@@ -56,33 +106,19 @@ class GatewayService:
         if request.stream:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Streaming is not supported in V1.",
+                detail="Use streaming route handling when stream=true.",
             )
 
-        request_id = uuid4().hex
-        strategy = request.strategy or self.settings.default_strategy
-        temperature = (
-            request.temperature if request.temperature is not None else self.settings.default_temperature
+        request_id, strategy, temperature, max_tokens, messages, prompt_id = self._prepare_request(
+            db,
+            request,
         )
-        max_tokens = request.max_tokens or self.settings.default_max_tokens
-
-        try:
-            messages, prompt_template = self.prompts.apply_template(
-                db,
-                request.messages,
-                request.prompt_id,
-                request.prompt_variables,
-            )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-                headers={"X-Request-ID": request_id},
-            ) from exc
-
-        prompt_id = prompt_template.prompt_id if prompt_template else request.prompt_id
+        prompt_blob = messages_cache_blob(messages)
         cache_key = self._build_cache_key(messages, request, strategy, temperature, prompt_id)
-        cache_enabled = not request.disable_cache and temperature <= self.settings.cache_temperature_threshold
+        cache_enabled = (
+            not request.disable_cache
+            and temperature <= self.settings.cache_temperature_threshold
+        )
         if cache_enabled:
             cached = self.cache.get(cache_key)
             if cached:
@@ -109,40 +145,25 @@ class GatewayService:
                         timestamp=datetime.now(timezone.utc),
                     ),
                 )
-                headers = {
-                    "X-Request-ID": request_id,
-                    "X-Branchat-Cache": "hit",
-                    "X-Branchat-Endpoint": str(cached.get("endpoint_id") or ""),
-                    "X-Branchat-Provider": str(cached.get("provider") or ""),
-                    "X-Branchat-Fallbacks": "0",
-                    "X-Branchat-Route-Reason": cached.get("route_reason", "cache"),
-                }
                 return GatewayResult(
                     response=response,
-                    headers=headers,
+                    headers=self._build_headers(
+                        request_id=request_id,
+                        endpoint_id=str(cached.get("endpoint_id") or ""),
+                        provider=str(cached.get("provider") or ""),
+                        fallback_count=0,
+                        route_reason=cached.get("route_reason", "cache"),
+                        cache_state="hit",
+                    ),
                     request_log_id=request_log.id if request_log else None,
                 )
 
-        try:
-            candidates, route_reason = self.routing.choose_candidates(
-                db,
-                request.model,
-                strategy,
-                request.endpoint_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-                headers={"X-Request-ID": request_id},
-            ) from exc
-        if not candidates:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No enabled endpoint found for logical model '{request.model}'.",
-                headers={"X-Request-ID": request_id},
-            )
-
+        candidates, route_reason = self._choose_candidates(
+            db,
+            request,
+            request_id,
+            strategy,
+        )
         errors: list[str] = []
         for index, endpoint in enumerate(candidates):
             provider = self.providers.get(endpoint.provider_type)
@@ -159,7 +180,7 @@ class GatewayService:
                 response = self._build_response(
                     request_id,
                     request.model,
-                    messages_cache_blob(messages),
+                    prompt_blob,
                     result.content,
                     result.finish_reason,
                     result,
@@ -202,32 +223,371 @@ class GatewayService:
                             "route_reason": route_reason,
                         },
                     )
-                headers = {
-                    "X-Request-ID": request_id,
-                    "X-Branchat-Cache": "miss",
-                    "X-Branchat-Endpoint": str(endpoint.id),
-                    "X-Branchat-Provider": endpoint.provider_type,
-                    "X-Branchat-Fallbacks": str(index),
-                    "X-Branchat-Route-Reason": route_reason,
-                }
                 return GatewayResult(
                     response=response,
-                    headers=headers,
+                    headers=self._build_headers(
+                        request_id=request_id,
+                        endpoint_id=str(endpoint.id),
+                        provider=endpoint.provider_type,
+                        fallback_count=index,
+                        route_reason=route_reason,
+                        cache_state="miss",
+                    ),
                     request_log_id=request_log.id,
                 )
             except ProviderCallError as exc:
                 self.state_tracker.record_failure(endpoint.id)
                 errors.append(f"{endpoint.name}:{exc.code}")
 
+        request_log = self._persist_terminal_error(
+            db,
+            request_id=request_id,
+            logical_model=request.model,
+            prompt_id=prompt_id,
+            route_reason=route_reason,
+            fallback_count=max(len(candidates) - 1, 0),
+            errors=errors,
+            endpoint=candidates[-1] if candidates else None,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "All candidate endpoints failed.", "errors": errors},
+            headers=self._build_headers(
+                request_id=request_id,
+                endpoint_id=str(request_log.endpoint_id or ""),
+                provider=str(request_log.provider or ""),
+                fallback_count=request_log.fallback_count,
+                route_reason=request_log.route_reason or "",
+                cache_state="miss",
+            ),
+        )
+
+    async def begin_chat_stream(
+        self,
+        db: Session,
+        request: ChatCompletionRequest,
+        *,
+        cancel_event: asyncio.Event | None = None,
+    ) -> GatewayStreamSession:
+        request_id, strategy, temperature, max_tokens, messages, prompt_id = self._prepare_request(
+            db,
+            request,
+        )
+        prompt_blob = messages_cache_blob(messages)
+        candidates, route_reason = self._choose_candidates(
+            db,
+            request,
+            request_id,
+            strategy,
+        )
+        errors: list[str] = []
+        for index, endpoint in enumerate(candidates):
+            provider = self.providers.get(endpoint.provider_type)
+            started_at = time.perf_counter()
+            iterator = provider.stream_chat_completions(
+                endpoint=endpoint,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                cancel_event=cancel_event,
+            )
+            try:
+                first_event = await self._next_stream_event(iterator)
+            except ProviderCallError as exc:
+                self.state_tracker.record_failure(endpoint.id)
+                errors.append(f"{endpoint.name}:{exc.code}")
+                continue
+
+            self.state_tracker.record_success(endpoint.id)
+            actual_model = first_event.actual_model if first_event else endpoint.model_name
+            call_info = GatewayStreamCallInfo(
+                request_id=request_id,
+                provider=endpoint.provider_type,
+                model=actual_model,
+                route_reason=route_reason,
+                cache_hit=False,
+                endpoint_id=str(endpoint.id),
+                fallback_count=index,
+                strategy=strategy,
+            )
+            return GatewayStreamSession(
+                request_id=request_id,
+                logical_model=request.model,
+                prompt_id=prompt_id,
+                prompt_blob=prompt_blob,
+                route_reason=route_reason,
+                strategy=strategy,
+                endpoint=endpoint,
+                fallback_count=index,
+                started_at=started_at,
+                headers=self._build_headers(
+                    request_id=request_id,
+                    endpoint_id=str(endpoint.id),
+                    provider=endpoint.provider_type,
+                    fallback_count=index,
+                    route_reason=route_reason,
+                    cache_state="miss",
+                ),
+                call_info=call_info,
+                iterator=iterator,
+                first_event=first_event,
+                cancel_event=cancel_event,
+            )
+
+        request_log = self._persist_terminal_error(
+            db,
+            request_id=request_id,
+            logical_model=request.model,
+            prompt_id=prompt_id,
+            route_reason=route_reason,
+            fallback_count=max(len(candidates) - 1, 0),
+            errors=errors,
+            endpoint=candidates[-1] if candidates else None,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "All candidate endpoints failed.", "errors": errors},
+            headers=self._build_headers(
+                request_id=request_id,
+                endpoint_id=str(request_log.endpoint_id or ""),
+                provider=str(request_log.provider or ""),
+                fallback_count=request_log.fallback_count,
+                route_reason=request_log.route_reason or "",
+                cache_state="miss",
+            ),
+        )
+
+    async def iterate_chat_stream(
+        self,
+        db: Session,
+        session: GatewayStreamSession,
+    ) -> AsyncIterator[GatewayStreamResult]:
+        content_parts: list[str] = []
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        total_tokens: int | None = None
+        finish_reason = "stop"
+        actual_model = session.call_info.model
+        try:
+            async for event in self._iterate_provider_events(session.first_event, session.iterator):
+                if event.delta:
+                    content_parts.append(event.delta)
+                    yield GatewayStreamResult(
+                        kind="delta",
+                        call_info=session.call_info,
+                        delta=event.delta,
+                        content="".join(content_parts),
+                    )
+                if event.finish_reason:
+                    finish_reason = event.finish_reason
+                if event.prompt_tokens is not None:
+                    prompt_tokens = event.prompt_tokens
+                if event.completion_tokens is not None:
+                    completion_tokens = event.completion_tokens
+                if event.total_tokens is not None:
+                    total_tokens = event.total_tokens
+                if event.actual_model:
+                    actual_model = event.actual_model
+
+            cancelled = bool(session.cancel_event and session.cancel_event.is_set())
+            content = "".join(content_parts)
+            latency_ms = int((time.perf_counter() - session.started_at) * 1000)
+            prompt_tokens = prompt_tokens or approximate_tokens(session.prompt_blob)
+            completion_tokens = completion_tokens or approximate_tokens(content)
+            total_tokens = total_tokens or prompt_tokens + completion_tokens
+            cost = self._calculate_cost(
+                session.endpoint.input_cost_per_1k,
+                session.endpoint.output_cost_per_1k,
+                prompt_tokens,
+                completion_tokens,
+            )
+            request_log = self._persist_log(
+                db,
+                RequestLog(
+                    request_id=session.request_id,
+                    endpoint_id=session.endpoint.id,
+                    logical_model=session.logical_model,
+                    provider=session.endpoint.provider_type,
+                    actual_model=actual_model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    cost_usd=cost,
+                    latency_ms=latency_ms,
+                    cache_hit=False,
+                    route_reason=session.route_reason,
+                    status="cancelled" if cancelled else "success",
+                    error_code=None,
+                    prompt_id=session.prompt_id,
+                    fallback_count=session.fallback_count,
+                    timestamp=datetime.now(timezone.utc),
+                ),
+            )
+            call_info = replace(
+                session.call_info,
+                model=actual_model,
+                latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                cost_usd=cost,
+                status="cancelled" if cancelled else ("fallback" if session.fallback_count > 0 else "success"),
+            )
+            yield GatewayStreamResult(
+                kind="cancelled" if cancelled else "completed",
+                call_info=call_info,
+                content=content,
+                finish_reason="cancelled" if cancelled else finish_reason,
+                request_log_id=request_log.id,
+            )
+        except ProviderCallError as exc:
+            self.state_tracker.record_failure(session.endpoint.id)
+            content = "".join(content_parts)
+            latency_ms = int((time.perf_counter() - session.started_at) * 1000)
+            prompt_tokens = prompt_tokens or approximate_tokens(session.prompt_blob)
+            completion_tokens = completion_tokens or approximate_tokens(content)
+            total_tokens = total_tokens or prompt_tokens + completion_tokens
+            request_log = self._persist_log(
+                db,
+                RequestLog(
+                    request_id=session.request_id,
+                    endpoint_id=session.endpoint.id,
+                    logical_model=session.logical_model,
+                    provider=session.endpoint.provider_type,
+                    actual_model=actual_model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    cost_usd=0.0,
+                    latency_ms=latency_ms,
+                    cache_hit=False,
+                    route_reason=session.route_reason,
+                    status="error",
+                    error_code=exc.code,
+                    prompt_id=session.prompt_id,
+                    fallback_count=session.fallback_count,
+                    timestamp=datetime.now(timezone.utc),
+                ),
+            )
+            yield GatewayStreamResult(
+                kind="error",
+                call_info=replace(
+                    session.call_info,
+                    model=actual_model,
+                    latency_ms=latency_ms,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    status="error",
+                ),
+                content=content,
+                finish_reason="error",
+                error_message=exc.message,
+                request_log_id=request_log.id,
+            )
+
+    def list_models(self, db: Session) -> list[str]:
+        models = self.endpoint_repository.list_enabled(db)
+        return sorted({item.logical_model for item in models})
+
+    def _prepare_request(
+        self,
+        db: Session,
+        request: ChatCompletionRequest,
+    ) -> tuple[str, str, float, int, list, str | None]:
+        request_id = uuid4().hex
+        strategy = request.strategy or self.settings.default_strategy
+        temperature = (
+            request.temperature if request.temperature is not None else self.settings.default_temperature
+        )
+        max_tokens = request.max_tokens or self.settings.default_max_tokens
+        try:
+            messages, prompt_template = self.prompts.apply_template(
+                db,
+                request.messages,
+                request.prompt_id,
+                request.prompt_variables,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+                headers={"X-Request-ID": request_id},
+            ) from exc
+        prompt_id = prompt_template.prompt_id if prompt_template else request.prompt_id
+        return request_id, strategy, temperature, max_tokens, messages, prompt_id
+
+    def _choose_candidates(
+        self,
+        db: Session,
+        request: ChatCompletionRequest,
+        request_id: str,
+        strategy: str,
+    ) -> tuple[list[ModelEndpoint], str]:
+        try:
+            candidates, route_reason = self.routing.choose_candidates(
+                db,
+                request.model,
+                strategy,
+                request.endpoint_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+                headers={"X-Request-ID": request_id},
+            ) from exc
+        if not candidates:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No enabled endpoint found for logical model '{request.model}'.",
+                headers={"X-Request-ID": request_id},
+            )
+        return candidates, route_reason
+
+    async def _next_stream_event(
+        self,
+        iterator: AsyncIterator[ProviderStreamEvent],
+    ) -> ProviderStreamEvent | None:
+        try:
+            return await anext(iterator)
+        except StopAsyncIteration:
+            return None
+
+    async def _iterate_provider_events(
+        self,
+        first_event: ProviderStreamEvent | None,
+        iterator: AsyncIterator[ProviderStreamEvent],
+    ) -> AsyncIterator[ProviderStreamEvent]:
+        if first_event is not None:
+            yield first_event
+        async for event in iterator:
+            yield event
+
+    def _persist_log(self, db: Session, request_log: RequestLog) -> RequestLog:
+        return self.request_log_repository.save(db, request_log)
+
+    def _persist_terminal_error(
+        self,
+        db: Session,
+        *,
+        request_id: str,
+        logical_model: str,
+        prompt_id: str | None,
+        route_reason: str,
+        fallback_count: int,
+        errors: list[str],
+        endpoint: ModelEndpoint | None,
+    ) -> RequestLog:
         error_code = errors[-1].split(":", 1)[-1] if errors else "provider_unavailable"
-        request_log = self._persist_log(
+        return self._persist_log(
             db,
             RequestLog(
                 request_id=request_id,
-                endpoint_id=candidates[-1].id if candidates else None,
-                logical_model=request.model,
-                provider=candidates[-1].provider_type if candidates else None,
-                actual_model=candidates[-1].model_name if candidates else None,
+                endpoint_id=endpoint.id if endpoint else None,
+                logical_model=logical_model,
+                provider=endpoint.provider_type if endpoint else None,
+                actual_model=endpoint.model_name if endpoint else None,
                 prompt_tokens=0,
                 completion_tokens=0,
                 total_tokens=0,
@@ -238,28 +598,10 @@ class GatewayService:
                 status="error",
                 error_code=error_code,
                 prompt_id=prompt_id,
-                fallback_count=max(len(candidates) - 1, 0),
+                fallback_count=fallback_count,
                 timestamp=datetime.now(timezone.utc),
             ),
         )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"message": "All candidate endpoints failed.", "errors": errors},
-            headers={
-                "X-Request-ID": request_id,
-                "X-Branchat-Endpoint": str(request_log.endpoint_id or ""),
-                "X-Branchat-Provider": str(request_log.provider or ""),
-                "X-Branchat-Fallbacks": str(request_log.fallback_count),
-                "X-Branchat-Route-Reason": request_log.route_reason or "",
-            },
-        )
-
-    def list_models(self, db: Session) -> list[str]:
-        models = self.endpoint_repository.list_enabled(db)
-        return sorted({item.logical_model for item in models})
-
-    def _persist_log(self, db: Session, request_log: RequestLog) -> RequestLog:
-        return self.request_log_repository.save(db, request_log)
 
     def _build_cache_key(
         self,
@@ -308,6 +650,25 @@ class GatewayService:
                 total_tokens=total_tokens,
             ),
         )
+
+    def _build_headers(
+        self,
+        *,
+        request_id: str,
+        endpoint_id: str,
+        provider: str,
+        fallback_count: int,
+        route_reason: str,
+        cache_state: str,
+    ) -> dict[str, str]:
+        return {
+            "X-Request-ID": request_id,
+            "X-Branchat-Cache": cache_state,
+            "X-Branchat-Endpoint": endpoint_id,
+            "X-Branchat-Provider": provider,
+            "X-Branchat-Fallbacks": str(fallback_count),
+            "X-Branchat-Route-Reason": route_reason,
+        }
 
     def _calculate_cost(
         self,

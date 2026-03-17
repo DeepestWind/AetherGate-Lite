@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+import json
+
+from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_bearer_token
@@ -25,7 +28,7 @@ from app.schemas.chat_sessions import (
     ChatMessageResponse,
     VisibleMessageResponse,
 )
-from app.services.chat_sessions import chat_session_service
+from app.services.chat_sessions import ChatSessionStreamEvent, chat_session_service
 
 router = APIRouter(
     prefix="/api/chat",
@@ -45,7 +48,9 @@ def _to_call_info(message: ChatMessageRecord) -> ChatCallInfoResponse | None:
     if not request_log or not message.strategy:
         return None
 
-    if request_log.status == "error":
+    if request_log.status == "cancelled":
+        status_value = "cancelled"
+    elif request_log.status == "error":
         status_value = "error"
     elif request_log.fallback_count > 0:
         status_value = "fallback"
@@ -137,6 +142,52 @@ def _to_conversation_response(conversation: ChatConversation) -> ChatConversatio
     )
 
 
+def _to_stream_event_payload(event: ChatSessionStreamEvent) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    if event.user_message_id is not None:
+        payload["userMessageId"] = event.user_message_id
+    if event.assistant_message_id is not None:
+        payload["assistantMessageId"] = event.assistant_message_id
+    if event.branch_id is not None:
+        payload["branchId"] = event.branch_id
+    if event.delta is not None:
+        payload["delta"] = event.delta
+    if event.content is not None:
+        payload["content"] = event.content
+    if event.meta is not None:
+        payload["meta"] = {
+            "requestId": event.meta.request_id,
+            "provider": event.meta.provider,
+            "model": event.meta.model,
+            "routeReason": event.meta.route_reason,
+            "cacheHit": event.meta.cache_hit,
+            "endpointId": event.meta.endpoint_id,
+            "fallbackCount": event.meta.fallback_count,
+            "strategy": event.meta.strategy,
+        }
+    if event.conversation is not None:
+        payload["conversation"] = _to_conversation_response(event.conversation).model_dump(mode="json")
+    if event.error_message is not None:
+        payload["errorMessage"] = event.error_message
+    return payload
+
+
+def _encode_sse_event(event_name: str, payload: dict[str, object]) -> str:
+    return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _build_streaming_response(generator):
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/conversations", response_model=list[ChatConversationSummaryResponse])
 def list_conversations(db: Session = Depends(get_db)):
     return [_to_summary_response(conversation) for conversation in chat_session_service.list_conversations(db)]
@@ -205,6 +256,32 @@ async def send_message(
     )
 
 
+@router.post("/conversations/{conversation_id}/messages/stream")
+async def stream_send_message(
+    conversation_id: str,
+    payload: ChatConversationMessageCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    async def event_stream():
+        assistant_message_id: str | None = None
+        async for event in chat_session_service.stream_send_message(
+            db,
+            conversation_id,
+            payload.content,
+            payload.draft_config,
+        ):
+            if event.assistant_message_id:
+                assistant_message_id = event.assistant_message_id
+            yield _encode_sse_event(event.kind, _to_stream_event_payload(event))
+            if assistant_message_id and await request.is_disconnected():
+                chat_session_service.stop_generation(db, conversation_id, assistant_message_id)
+        if assistant_message_id and await request.is_disconnected():
+            chat_session_service.stop_generation(db, conversation_id, assistant_message_id)
+
+    return _build_streaming_response(event_stream())
+
+
 @router.post("/conversations/{conversation_id}/messages/commit", response_model=ChatConversationResponse)
 async def commit_message_edits_and_send_message(
     conversation_id: str,
@@ -220,6 +297,31 @@ async def commit_message_edits_and_send_message(
             modified_nodes=payload.modified_nodes,
         ),
     )
+
+
+@router.post("/conversations/{conversation_id}/messages/commit/stream")
+async def stream_commit_message_edits_and_send_message(
+    conversation_id: str,
+    payload: ChatConversationMessageCommitCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    async def event_stream():
+        assistant_message_id: str | None = None
+        async for event in chat_session_service.stream_send_message(
+            db,
+            conversation_id,
+            payload.content,
+            payload.draft_config,
+            modified_nodes=payload.modified_nodes,
+        ):
+            if event.assistant_message_id:
+                assistant_message_id = event.assistant_message_id
+            yield _encode_sse_event(event.kind, _to_stream_event_payload(event))
+            if assistant_message_id and await request.is_disconnected():
+                chat_session_service.stop_generation(db, conversation_id, assistant_message_id)
+
+    return _build_streaming_response(event_stream())
 
 
 @router.post(
@@ -243,6 +345,32 @@ async def edit_message_in_new_branch(
     )
 
 
+@router.post("/conversations/{conversation_id}/messages/{message_id}/branch-edit/stream")
+async def stream_edit_message_in_new_branch(
+    conversation_id: str,
+    message_id: str,
+    payload: ChatConversationMessageBranchEditCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    async def event_stream():
+        assistant_message_id: str | None = None
+        async for event in chat_session_service.stream_edit_message_in_new_branch(
+            db,
+            conversation_id,
+            message_id,
+            payload.content,
+            payload.draft_config,
+        ):
+            if event.assistant_message_id:
+                assistant_message_id = event.assistant_message_id
+            yield _encode_sse_event(event.kind, _to_stream_event_payload(event))
+            if assistant_message_id and await request.is_disconnected():
+                chat_session_service.stop_generation(db, conversation_id, assistant_message_id)
+
+    return _build_streaming_response(event_stream())
+
+
 @router.post(
     "/conversations/{conversation_id}/messages/{message_id}/regenerate",
     response_model=ChatConversationResponse,
@@ -262,6 +390,42 @@ async def regenerate_message(
             modified_nodes=payload.modified_nodes,
         ),
     )
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/regenerate/stream")
+async def stream_regenerate_message(
+    conversation_id: str,
+    message_id: str,
+    payload: ChatConversationMessageRegenerateCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    async def event_stream():
+        assistant_message_id: str | None = None
+        async for event in chat_session_service.stream_regenerate_message(
+            db,
+            conversation_id,
+            message_id,
+            payload.draft_config,
+            modified_nodes=payload.modified_nodes,
+        ):
+            if event.assistant_message_id:
+                assistant_message_id = event.assistant_message_id
+            yield _encode_sse_event(event.kind, _to_stream_event_payload(event))
+            if assistant_message_id and await request.is_disconnected():
+                chat_session_service.stop_generation(db, conversation_id, assistant_message_id)
+
+    return _build_streaming_response(event_stream())
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/stop", status_code=status.HTTP_204_NO_CONTENT)
+def stop_message_generation(
+    conversation_id: str,
+    message_id: str,
+    db: Session = Depends(get_db),
+):
+    chat_session_service.stop_generation(db, conversation_id, message_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
