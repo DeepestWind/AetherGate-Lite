@@ -11,7 +11,7 @@ type MessageBubbleProps = {
   message: ChatMessage
   nextSiblingId: string | null
   onBranchMessage: (message: ChatMessage) => void | Promise<void>
-  onEditMessage: (message: ChatMessage, content: string) => void
+  onEditMessage: (message: ChatMessage, content: string) => void | Promise<void>
   onRegenerateMessage: (message: ChatMessage) => void | Promise<void>
   onSelectSiblingMessage: (messageId: string) => void | Promise<void>
   onTogglePinMessage: (message: ChatMessage) => void
@@ -124,12 +124,12 @@ export function MessageBubble({
     setCallInfoOpen((current) => !current)
   }
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!canSaveEdit) {
       return
     }
 
-    onEditMessage(message, draftContent)
+    await onEditMessage(message, draftContent)
     setEditing(false)
   }
 
@@ -212,7 +212,12 @@ export function MessageBubble({
                   >
                     取消
                   </Button>
-                  <Button type="button" size="sm" onClick={handleSaveEdit} disabled={!canSaveEdit}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handleSaveEdit()}
+                    disabled={!canSaveEdit}
+                  >
                     保存修改
                   </Button>
                 </div>

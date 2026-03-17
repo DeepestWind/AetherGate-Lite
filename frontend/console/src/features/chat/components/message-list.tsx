@@ -8,7 +8,7 @@ type MessageListProps = {
   messages: ChatMessage[]
   messageNodes: Record<string, ChatMessage>
   onBranchMessage: (message: ChatMessage) => void | Promise<void>
-  onEditMessage: (message: ChatMessage, content: string) => void
+  onEditMessage: (message: ChatMessage, content: string) => void | Promise<void>
   onRegenerateMessage: (message: ChatMessage) => void | Promise<void>
   onSelectSiblingMessage: (messageId: string) => void | Promise<void>
   onStarterPromptSelect: (prompt: string) => void

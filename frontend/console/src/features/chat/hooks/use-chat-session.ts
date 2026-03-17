@@ -18,6 +18,7 @@ import {
   createConversationBranch,
   createChatConversation,
   deleteChatConversation,
+  editConversationMessageInBranch,
   getChatConversation,
   listChatConversations,
   regenerateConversationMessage,
@@ -32,6 +33,11 @@ import {
 type UseChatSessionResult = {
   activeSession: ChatSession | null
   activeSessionId: string | null
+  commitMessageEdit: (
+    messageId: string,
+    content: string,
+    config: ChatConfig
+  ) => Promise<'buffered' | 'branch_assistant' | 'branch_user'>
   createSession: (config: ChatConfig) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   initializing: boolean
@@ -81,7 +87,10 @@ function buildSessionGraph(
     messages?: ChatMessage[]
   }
 ) {
-  return resolveChatSessionGraph(session)
+  return resolveChatSessionGraph({
+    ...session,
+    messagesSource: session.messagesSource ?? 'graph'
+  })
 }
 
 function mergeSessionState(
@@ -99,6 +108,9 @@ function mergeSessionState(
   const messageNodes = shouldPreserveGraph
     ? (currentSession?.messageNodes ?? {})
     : incoming.messageNodes
+  const messagesSource = shouldPreserveGraph
+    ? (currentSession?.messagesSource ?? 'graph')
+    : (incoming.messagesSource ?? 'graph')
 
   return buildSessionGraph({
     ...currentSession,
@@ -106,6 +118,7 @@ function mergeSessionState(
     activeBranchId,
     branches,
     messageNodes,
+    messagesSource,
     messagesLoaded,
     messages: shouldPreserveGraph ? (currentSession?.messages ?? []) : incoming.messages
   })
@@ -216,6 +229,15 @@ function findLatestAssistantSibling(
     }
     return right.id.localeCompare(left.id)
   })[0] ?? null
+}
+
+function hasVisibleChildMessage(
+  messageNodes: Record<string, ChatMessage>,
+  messageId: string
+) {
+  return Object.values(messageNodes).some(
+    (message) => message.parentId === messageId && !message.archived
+  )
 }
 
 function applyPendingEditsToMessages(
@@ -576,6 +598,68 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     })
   }
 
+  async function commitMessageEdit(messageId: string, content: string, config: ChatConfig) {
+    if (!activeSessionId || !activeSession) {
+      return 'buffered' as const
+    }
+
+    const targetMessage =
+      activeSession.messageNodes[messageId] ??
+      activeSession.messages.find((message) => message.id === messageId)
+    const normalizedContent = content.trim()
+
+    if (!targetMessage || !normalizedContent) {
+      return 'buffered' as const
+    }
+
+    if (normalizedContent === targetMessage.content) {
+      clearPendingEdit(messageId)
+      return 'buffered' as const
+    }
+
+    if (!hasVisibleChildMessage(activeSession.messageNodes, messageId)) {
+      setPendingEdit(messageId, normalizedContent)
+      return 'buffered' as const
+    }
+
+    if (sendingSessionId) {
+      return targetMessage.role === 'user' ? 'branch_user' : 'branch_assistant'
+    }
+
+    setSendingSessionId(activeSessionId)
+    try {
+      const payload = await editConversationMessageInBranch(activeSessionId, messageId, {
+        content: normalizedContent,
+        draftConfig: config
+      })
+      const updated = normalizeChatSession(payload)
+      setSessions((current) => upsertSessions(current, updated))
+      setPendingEditsBySession((current) => {
+        const currentSessionEdits = current[activeSessionId]
+        if (!currentSessionEdits || !(messageId in currentSessionEdits)) {
+          return current
+        }
+
+        const nextSessionEdits = { ...currentSessionEdits }
+        delete nextSessionEdits[messageId]
+
+        if (Object.keys(nextSessionEdits).length === 0) {
+          const next = { ...current }
+          delete next[activeSessionId]
+          return next
+        }
+
+        return {
+          ...current,
+          [activeSessionId]: nextSessionEdits
+        }
+      })
+      return targetMessage.role === 'user' ? 'branch_user' : 'branch_assistant'
+    } finally {
+      setSendingSessionId((current) => (current === activeSessionId ? null : current))
+    }
+  }
+
   function clearPendingEdit(messageId: string) {
     if (!activeSessionId) {
       return
@@ -826,6 +910,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     activeSession,
     activeSessionId,
     clearPendingEdit,
+    commitMessageEdit,
     createBranch,
     createSession,
     deleteSession,

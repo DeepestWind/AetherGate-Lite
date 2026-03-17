@@ -6,6 +6,7 @@ import {
   createConversationBranch,
   createChatConversation,
   deleteChatConversation,
+  editConversationMessageInBranch,
   getChatConversation,
   listChatConversations,
   regenerateConversationMessage,
@@ -21,6 +22,7 @@ vi.mock('@/shared/api/modules/chat', () => ({
   createChatConversation: vi.fn(),
   createConversationBranch: vi.fn(),
   deleteChatConversation: vi.fn(),
+  editConversationMessageInBranch: vi.fn(),
   getChatConversation: vi.fn(),
   listChatConversations: vi.fn(),
   activateConversationBranch: vi.fn(),
@@ -140,6 +142,27 @@ describe('useChatSession', () => {
       updated_at: 1000
     })
     vi.mocked(updateConversationMessagePin).mockResolvedValue({
+      id: 'conv_1',
+      title: '手动标题',
+      draft_config: {
+        model: 'gpt-lite',
+        prompt_id: '',
+        strategy: 'balanced',
+        temperature: 0,
+        variables: {}
+      },
+      last_message_at: null,
+      last_message_preview: null,
+      last_message_role: null,
+      active_branch_id: 'branch_main',
+      message_count: 0,
+      created_at: 1000,
+      updated_at: 1000,
+      branches: [mainBranch],
+      message_nodes: {},
+      messages: []
+    })
+    vi.mocked(editConversationMessageInBranch).mockResolvedValue({
       id: 'conv_1',
       title: '手动标题',
       draft_config: {
@@ -923,6 +946,276 @@ describe('useChatSession', () => {
     expect(result.current.pendingEditCount).toBe(0)
     expect(result.current.messages[0]?.content).toBe('改写后的第一条消息')
     expect(result.current.messages[0]?.pendingEdit).toBeFalsy()
+  })
+
+  it('branches immediately when editing a non-leaf user message', async () => {
+    vi.mocked(getChatConversation).mockResolvedValueOnce({
+      id: 'conv_1',
+      title: '手动标题',
+      draft_config: {
+        model: 'gpt-lite',
+        prompt_id: '',
+        strategy: 'balanced',
+        temperature: 0,
+        variables: {}
+      },
+      last_message_at: 3000,
+      last_message_preview: '第二轮回复',
+      last_message_role: 'assistant',
+      active_branch_id: 'branch_main',
+      message_count: 4,
+      created_at: 1000,
+      updated_at: 3000,
+      branches: [
+        {
+          id: 'branch_main',
+          name: 'main',
+          head_message_id: 'msg_4',
+          base_message_id: 'msg_1'
+        }
+      ],
+      message_nodes: {
+        msg_1: {
+          id: 'msg_1',
+          role: 'user',
+          content: '第一条消息',
+          status: 'completed',
+          timestamp: 1500,
+          parent_id: null,
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_2: {
+          id: 'msg_2',
+          role: 'assistant',
+          content: '第一轮回复',
+          status: 'completed',
+          timestamp: 2000,
+          parent_id: 'msg_1',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_3: {
+          id: 'msg_3',
+          role: 'user',
+          content: '继续追问',
+          status: 'completed',
+          timestamp: 2500,
+          parent_id: 'msg_2',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_4: {
+          id: 'msg_4',
+          role: 'assistant',
+          content: '第二轮回复',
+          status: 'completed',
+          timestamp: 3000,
+          parent_id: 'msg_3',
+          pinned: false,
+          archived: false,
+          stale: false
+        }
+      },
+      messages: [
+        {
+          id: 'msg_1',
+          role: 'user',
+          content: '第一条消息',
+          status: 'completed',
+          timestamp: 1500,
+          parent_id: null,
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        {
+          id: 'msg_2',
+          role: 'assistant',
+          content: '第一轮回复',
+          status: 'completed',
+          timestamp: 2000,
+          parent_id: 'msg_1',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        {
+          id: 'msg_3',
+          role: 'user',
+          content: '继续追问',
+          status: 'completed',
+          timestamp: 2500,
+          parent_id: 'msg_2',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        {
+          id: 'msg_4',
+          role: 'assistant',
+          content: '第二轮回复',
+          status: 'completed',
+          timestamp: 3000,
+          parent_id: 'msg_3',
+          pinned: false,
+          archived: false,
+          stale: false
+        }
+      ]
+    })
+    vi.mocked(editConversationMessageInBranch).mockResolvedValueOnce({
+      id: 'conv_1',
+      title: '手动标题',
+      draft_config: {
+        model: 'gpt-lite',
+        prompt_id: '',
+        strategy: 'balanced',
+        temperature: 0,
+        variables: {}
+      },
+      last_message_at: 3600,
+      last_message_preview: '改写后的自动回复',
+      last_message_role: 'assistant',
+      active_branch_id: 'branch_side',
+      message_count: 6,
+      created_at: 1000,
+      updated_at: 3600,
+      branches: [
+        {
+          id: 'branch_main',
+          name: 'main',
+          head_message_id: 'msg_4',
+          base_message_id: 'msg_1'
+        },
+        {
+          id: 'branch_side',
+          name: 'branch-2',
+          head_message_id: 'msg_6',
+          base_message_id: 'msg_5'
+        }
+      ],
+      message_nodes: {
+        msg_1: {
+          id: 'msg_1',
+          role: 'user',
+          content: '第一条消息',
+          status: 'completed',
+          timestamp: 1500,
+          parent_id: null,
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_2: {
+          id: 'msg_2',
+          role: 'assistant',
+          content: '第一轮回复',
+          status: 'completed',
+          timestamp: 2000,
+          parent_id: 'msg_1',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_3: {
+          id: 'msg_3',
+          role: 'user',
+          content: '继续追问',
+          status: 'completed',
+          timestamp: 2500,
+          parent_id: 'msg_2',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_4: {
+          id: 'msg_4',
+          role: 'assistant',
+          content: '第二轮回复',
+          status: 'completed',
+          timestamp: 3000,
+          parent_id: 'msg_3',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_5: {
+          id: 'msg_5',
+          role: 'user',
+          content: '改写后的第一条消息',
+          status: 'completed',
+          timestamp: 3300,
+          parent_id: null,
+          modified_from: 'msg_1',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        msg_6: {
+          id: 'msg_6',
+          role: 'assistant',
+          content: '改写后的自动回复',
+          status: 'completed',
+          timestamp: 3600,
+          parent_id: 'msg_5',
+          pinned: false,
+          archived: false,
+          stale: false
+        }
+      },
+      messages: [
+        {
+          id: 'msg_5',
+          role: 'user',
+          content: '改写后的第一条消息',
+          status: 'completed',
+          timestamp: 3300,
+          parent_id: null,
+          modified_from: 'msg_1',
+          pinned: false,
+          archived: false,
+          stale: false
+        },
+        {
+          id: 'msg_6',
+          role: 'assistant',
+          content: '改写后的自动回复',
+          status: 'completed',
+          timestamp: 3600,
+          parent_id: 'msg_5',
+          pinned: false,
+          archived: false,
+          stale: false
+        }
+      ]
+    })
+
+    const { result } = renderHook(() => useChatSession(true))
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe('conv_1')
+    })
+
+    await act(async () => {
+      await result.current.selectSession('conv_1')
+    })
+
+    let mode: 'buffered' | 'branch_assistant' | 'branch_user' | null = null
+    await act(async () => {
+      mode = await result.current.commitMessageEdit('msg_1', '改写后的第一条消息', draftConfig)
+    })
+
+    expect(mode).toBe('branch_user')
+    expect(editConversationMessageInBranch).toHaveBeenCalledWith('conv_1', 'msg_1', {
+      content: '改写后的第一条消息',
+      draftConfig
+    })
+    expect(result.current.activeSession?.activeBranchId).toBe('branch_side')
+    expect(result.current.messages.map((message) => message.id)).toEqual(['msg_5', 'msg_6'])
   })
 
   it('regenerates an assistant message as a sibling variant and clears pending edits', async () => {

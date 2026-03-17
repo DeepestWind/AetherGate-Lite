@@ -24,6 +24,7 @@ export type ChatMessage = {
   errorMessage?: string | null
   id: string
   loading?: boolean
+  kind?: 'node' | 'summary'
   originalContent?: string | null
   parentId: string | null
   pendingEdit?: boolean
@@ -32,6 +33,7 @@ export type ChatMessage = {
   archived: boolean
   stale: boolean
   role: ChatRole
+  sourceNodeId?: string | null
   status: ChatMessageStatus
   timestamp: number
 }
@@ -57,6 +59,7 @@ export type ChatSession = {
   lastMessageRole: ChatRole | null
   messageCount: number
   messages: ChatMessage[]
+  messagesSource?: 'graph' | 'server'
   messageNodes: Record<string, ChatMessage>
   messagesLoaded: boolean
   title: string

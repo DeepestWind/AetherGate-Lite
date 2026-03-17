@@ -144,6 +144,30 @@ export async function sendConversationMessageWithEdits(
   return response.data
 }
 
+export async function editConversationMessageInBranch(
+  conversationId: string,
+  messageId: string,
+  payload: {
+    content: string
+    draftConfig: ChatConversationConfigPayload
+  }
+) {
+  const response = await apiClient.post<unknown>(
+    `/api/chat/conversations/${conversationId}/messages/${messageId}/branch-edit`,
+    {
+      content: payload.content,
+      draft_config: {
+        model: payload.draftConfig.model,
+        prompt_id: payload.draftConfig.promptId,
+        strategy: payload.draftConfig.strategy,
+        temperature: payload.draftConfig.temperature,
+        variables: payload.draftConfig.variables
+      }
+    }
+  )
+  return response.data
+}
+
 export async function regenerateConversationMessage(
   conversationId: string,
   messageId: string,

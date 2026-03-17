@@ -146,10 +146,25 @@ export function ChatPage() {
     await session.renameSession(sessionId, title)
   }
 
-  const handleEditMessage = (message: ChatMessage, content: string) => {
+  const handleEditMessage = async (message: ChatMessage, content: string) => {
     const baselineContent = message.originalContent ?? message.content
-    session.setPendingEdit(message.id, content)
-    toast.success(content === baselineContent ? '已撤销本地修改' : '已加入待提交修改')
+    try {
+      const mode = await session.commitMessageEdit(message.id, content, config)
+
+      if (mode === 'buffered') {
+        toast.success(content === baselineContent ? '已撤销本地修改' : '已加入待提交修改')
+        return
+      }
+
+      if (mode === 'branch_user') {
+        toast.success('已从该用户消息开出新分支，并自动生成回复')
+        return
+      }
+
+      toast.success('已从该消息开出新分支')
+    } catch {
+      toast.error('保存修改失败')
+    }
   }
 
   const handleRegenerateMessage = async (message: ChatMessage) => {
