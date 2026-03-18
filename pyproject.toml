@@ -1,7 +1,7 @@
 [project]
 name = "branchat"
 version = "0.1.0"
-description = "A lightweight self-hosted multi-model gateway for personal use."
+description = "A branching chat module for guided, context-aware AI conversations."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
