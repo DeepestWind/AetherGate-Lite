@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
@@ -25,7 +23,6 @@ from app.schemas.chat import (
     ChatCompletionResponse,
     UsageInfo,
 )
-from app.services.cache import TTLCache
 from app.services.endpoint_state import EndpointStateTracker
 from app.services.prompt_utils import approximate_tokens, messages_cache_blob
 from app.services.prompts import PromptService
@@ -91,7 +88,6 @@ class GatewayService:
     def __init__(self):
         settings = get_settings()
         self.settings = settings
-        self.cache = TTLCache(settings.cache_ttl_seconds)
         self.state_tracker = EndpointStateTracker(
             threshold=settings.failure_threshold,
             cooldown_seconds=settings.failure_cooldown_seconds,
@@ -114,50 +110,6 @@ class GatewayService:
             request,
         )
         prompt_blob = messages_cache_blob(messages)
-        cache_key = self._build_cache_key(messages, request, strategy, temperature, prompt_id)
-        cache_enabled = (
-            not request.disable_cache
-            and temperature <= self.settings.cache_temperature_threshold
-        )
-        if cache_enabled:
-            cached = self.cache.get(cache_key)
-            if cached:
-                response = ChatCompletionResponse.model_validate(cached["response"])
-                request_log = self._persist_log(
-                    db,
-                    RequestLog(
-                        request_id=request_id,
-                        endpoint_id=cached.get("endpoint_id"),
-                        logical_model=request.model,
-                        provider=cached.get("provider"),
-                        actual_model=response.model,
-                        prompt_tokens=response.usage.prompt_tokens,
-                        completion_tokens=response.usage.completion_tokens,
-                        total_tokens=response.usage.total_tokens,
-                        cost_usd=0.0,
-                        latency_ms=0,
-                        cache_hit=True,
-                        route_reason=f"{cached.get('route_reason', 'cache')}#cache",
-                        status="success",
-                        error_code=None,
-                        prompt_id=prompt_id,
-                        fallback_count=0,
-                        timestamp=datetime.now(timezone.utc),
-                    ),
-                )
-                return GatewayResult(
-                    response=response,
-                    headers=self._build_headers(
-                        request_id=request_id,
-                        endpoint_id=str(cached.get("endpoint_id") or ""),
-                        provider=str(cached.get("provider") or ""),
-                        fallback_count=0,
-                        route_reason=cached.get("route_reason", "cache"),
-                        cache_state="hit",
-                    ),
-                    request_log_id=request_log.id if request_log else None,
-                )
-
         candidates, route_reason = self._choose_candidates(
             db,
             request,
@@ -213,16 +165,6 @@ class GatewayService:
                         timestamp=datetime.now(timezone.utc),
                     ),
                 )
-                if cache_enabled:
-                    self.cache.set(
-                        cache_key,
-                        {
-                            "response": response.model_dump(),
-                            "endpoint_id": endpoint.id,
-                            "provider": endpoint.provider_type,
-                            "route_reason": route_reason,
-                        },
-                    )
                 return GatewayResult(
                     response=response,
                     headers=self._build_headers(
@@ -231,7 +173,6 @@ class GatewayService:
                         provider=endpoint.provider_type,
                         fallback_count=index,
                         route_reason=route_reason,
-                        cache_state="miss",
                     ),
                     request_log_id=request_log.id,
                 )
@@ -258,7 +199,6 @@ class GatewayService:
                 provider=str(request_log.provider or ""),
                 fallback_count=request_log.fallback_count,
                 route_reason=request_log.route_reason or "",
-                cache_state="miss",
             ),
         )
 
@@ -326,7 +266,6 @@ class GatewayService:
                     provider=endpoint.provider_type,
                     fallback_count=index,
                     route_reason=route_reason,
-                    cache_state="miss",
                 ),
                 call_info=call_info,
                 iterator=iterator,
@@ -353,7 +292,6 @@ class GatewayService:
                 provider=str(request_log.provider or ""),
                 fallback_count=request_log.fallback_count,
                 route_reason=request_log.route_reason or "",
-                cache_state="miss",
             ),
         )
 
@@ -603,24 +541,6 @@ class GatewayService:
             ),
         )
 
-    def _build_cache_key(
-        self,
-        messages,
-        request: ChatCompletionRequest,
-        strategy: str,
-        temperature: float,
-        prompt_id: str | None,
-    ) -> str:
-        payload = {
-            "messages": messages_cache_blob(messages),
-            "model": request.model,
-            "strategy": strategy,
-            "prompt_id": prompt_id,
-            "temperature": temperature,
-            "max_tokens": request.max_tokens,
-        }
-        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-
     def _build_response(
         self,
         request_id: str,
@@ -659,11 +579,9 @@ class GatewayService:
         provider: str,
         fallback_count: int,
         route_reason: str,
-        cache_state: str,
     ) -> dict[str, str]:
         return {
             "X-Request-ID": request_id,
-            "X-Branchat-Cache": cache_state,
             "X-Branchat-Endpoint": endpoint_id,
             "X-Branchat-Provider": provider,
             "X-Branchat-Fallbacks": str(fallback_count),

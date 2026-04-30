@@ -106,12 +106,10 @@ def test_gateway_flow_with_prompt_cache_and_metrics(client, auth_headers, monkey
     }
     first_response = client.post("/v1/chat/completions", headers=auth_headers, json=payload)
     assert first_response.status_code == 200
-    assert first_response.headers["x-branchat-cache"] == "miss"
     assert first_response.json()["choices"][0]["message"]["content"] == "reply-from-primary-openai"
 
     second_response = client.post("/v1/chat/completions", headers=auth_headers, json=payload)
     assert second_response.status_code == 200
-    assert second_response.headers["x-branchat-cache"] == "hit"
 
     models_response = client.get("/v1/models", headers=auth_headers)
     assert models_response.status_code == 200
@@ -122,12 +120,12 @@ def test_gateway_flow_with_prompt_cache_and_metrics(client, auth_headers, monkey
     logs_response = client.get("/internal/logs", headers=auth_headers)
     assert logs_response.status_code == 200
     assert logs_response.json()["total"] == 2
-    assert any(item["cache_hit"] is True for item in logs_response.json()["items"])
+    assert all(item["cache_hit"] is False for item in logs_response.json()["items"])
 
     metrics_response = client.get("/internal/metrics", headers=auth_headers)
     assert metrics_response.status_code == 200
     assert metrics_response.json()["total_requests"] == 2
-    assert metrics_response.json()["cache_hits"] == 1
+    assert metrics_response.json()["cache_hits"] == 0
 
     stats_response = client.get("/internal/stats", headers=auth_headers)
     assert stats_response.status_code == 200
@@ -205,66 +203,6 @@ def test_gateway_fallback_uses_next_candidate(client, auth_headers, monkeypatch)
     first_item = logs_response.json()["items"][0]
     assert first_item["fallback_count"] == 1
     assert first_item["endpoint_name"] == "backup"
-
-
-def test_cheapest_strategy_prefers_known_costs_over_null_costs(client, auth_headers, monkeypatch):
-    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
-        return ProviderChatResult(
-            content=f"reply-from-{endpoint.name}",
-            finish_reason="stop",
-            prompt_tokens=10,
-            completion_tokens=5,
-            total_tokens=15,
-            actual_model=endpoint.model_name,
-        )
-
-    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
-
-    unknown_cost_response = client.post(
-        "/api/endpoints",
-        headers=auth_headers,
-        json={
-            "name": "unknown-cost",
-            "provider_type": "openai_compatible",
-            "base_url": "https://provider.example/v1",
-            "api_key": "sk-test-key",
-            "model_name": "gpt-4o-mini",
-            "logical_model": "gpt-lite",
-            "priority": 1,
-        },
-    )
-    assert unknown_cost_response.status_code == 201
-
-    known_cost_response = client.post(
-        "/api/endpoints",
-        headers=auth_headers,
-        json={
-            "name": "known-cost",
-            "provider_type": "openai_compatible",
-            "base_url": "https://provider.example/v1",
-            "api_key": "sk-test-key",
-            "model_name": "gpt-4o-mini",
-            "logical_model": "gpt-lite",
-            "priority": 10,
-            "input_cost_per_1k": 0.1,
-            "output_cost_per_1k": 0.2,
-        },
-    )
-    assert known_cost_response.status_code == 201
-
-    response = client.post(
-        "/v1/chat/completions",
-        headers=auth_headers,
-        json={
-            "model": "gpt-lite",
-            "temperature": 0.2,
-            "messages": [{"role": "user", "content": "hello"}],
-            "strategy": "cheapest",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["choices"][0]["message"]["content"] == "reply-from-known-cost"
 
 
 def test_chat_conversation_persists_messages_and_config(client, auth_headers, monkeypatch):
@@ -1255,7 +1193,6 @@ def test_gateway_streaming_returns_openai_style_sse(client, auth_headers, monkey
         assert response.status_code == 200
         blocks = list(_parse_sse_blocks(response.iter_lines()))
 
-    assert response.headers["x-branchat-cache"] == "miss"
     assert json.loads(blocks[0]["data"])["choices"][0]["delta"] == {"role": "assistant"}
     assert json.loads(blocks[1]["data"])["choices"][0]["delta"] == {"content": "你好"}
     assert json.loads(blocks[2]["data"])["choices"][0]["delta"] == {"content": "，世界"}

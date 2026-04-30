@@ -39,7 +39,6 @@ def clean_state():
         db.query(PromptTemplate).delete()
         db.query(ModelEndpoint).delete()
         db.commit()
-    gateway_service.cache._store.clear()
     gateway_service.state_tracker._state.clear()
     gateway_service.routing._balanced_cursor.clear()
     yield

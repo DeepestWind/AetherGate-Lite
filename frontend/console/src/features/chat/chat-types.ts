@@ -1,4 +1,4 @@
-export type ChatStrategy = 'balanced' | 'cheapest' | 'quality'
+export type ChatStrategy = 'balanced'
 export type ChatRole = 'assistant' | 'summary' | 'system' | 'tool' | 'user'
 export type ChatMessageStatus = 'completed' | 'error' | 'pending' | 'stopped'
 

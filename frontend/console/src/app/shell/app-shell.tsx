@@ -40,7 +40,7 @@ const navigationItems = [
   },
   {
     to: '/dashboard',
-    label: '概览',
+    label: '运行指标',
     icon: BarChart3
   },
   {
@@ -58,11 +58,11 @@ const navigationItems = [
 const pageMeta = {
   '/chat': {
     title: '聊天',
-    subtitle: '验证模型路由、Prompt 注入和实时响应链路。'
+    subtitle: '在树形对话中分叉、编辑、重生与压缩历史。'
   },
   '/dashboard': {
-    title: '概览',
-    subtitle: '查看请求指标、趋势统计和最近日志。'
+    title: '运行指标',
+    subtitle: '查看后端调用的请求指标、趋势统计和最近日志。'
   },
   '/endpoints': {
     title: '入口点',

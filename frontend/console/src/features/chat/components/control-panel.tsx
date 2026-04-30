@@ -23,9 +23,7 @@ type ControlPanelProps = {
 }
 
 const strategies: Array<{ description: string; label: string; value: ChatStrategy }> = [
-  { value: 'cheapest', label: '最低成本', description: '优先走便宜节点' },
-  { value: 'balanced', label: '均衡', description: '默认推荐策略' },
-  { value: 'quality', label: '最高质量', description: '优先走高质量节点' }
+  { value: 'balanced', label: '均衡', description: '默认推荐策略' }
 ]
 
 export function ControlPanel({

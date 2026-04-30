@@ -26,8 +26,6 @@ class Settings(BaseModel):
     database_url: str = DEFAULT_DATABASE_URL
     auth_token: str = "change-me"
     master_key: str = "dev-master-key-change-me"
-    cache_ttl_seconds: int = 300
-    cache_temperature_threshold: float = 0.3
     request_timeout_seconds: int = 60
     timezone: str = "Asia/Shanghai"
     failure_threshold: int = 3
@@ -57,8 +55,6 @@ def _read_env_overrides() -> dict:
         "database_url": "BRANCHAT_DATABASE_URL",
         "auth_token": "BRANCHAT_AUTH_TOKEN",
         "master_key": "BRANCHAT_MASTER_KEY",
-        "cache_ttl_seconds": "BRANCHAT_CACHE_TTL_SECONDS",
-        "cache_temperature_threshold": "BRANCHAT_CACHE_TEMPERATURE_THRESHOLD",
         "request_timeout_seconds": "BRANCHAT_REQUEST_TIMEOUT_SECONDS",
         "timezone": "BRANCHAT_TIMEZONE",
         "failure_threshold": "BRANCHAT_FAILURE_THRESHOLD",

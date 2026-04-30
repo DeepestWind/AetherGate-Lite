@@ -24,9 +24,8 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1, le=65536)
     prompt_id: str | None = None
     prompt_variables: dict[str, Any] = Field(default_factory=dict)
-    strategy: Literal["designated", "balanced", "cheapest", "quality"] | None = None
+    strategy: Literal["designated", "balanced"] | None = None
     endpoint_id: int | None = None
-    disable_cache: bool = False
     stream: bool = False
 
 

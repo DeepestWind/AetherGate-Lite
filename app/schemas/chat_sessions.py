@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-ChatStrategy = Literal["balanced", "cheapest", "quality"]
+ChatStrategy = Literal["balanced"]
 ChatMessageRole = Literal["assistant", "summary", "system", "tool", "user"]
 ChatMessageStatus = Literal["completed", "error", "pending", "stopped"]
 VisibleMessageKind = Literal["node", "summary"]

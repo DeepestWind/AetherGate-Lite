@@ -1,92 +1,96 @@
 # Branchat
 
-一个基于 FastAPI + React 的 AI 对话系统，支持分支会话、模型网关、Prompt 模板管理与调试控制台。
+> 普通 chatbot 是一条单链，Branchat 是一棵树。
 
-> 对话可以分叉，思路不再跑偏。
-
-Branchat 把传统的线性聊天升级成树形对话结构。你可以从任意 AI 回复继续分支、编辑已有回复来引导后续上下文、为同一轮回答保留多个变体，并在上下文过长时自动压缩历史内容，而不破坏现有对话链。
-
-这个仓库不仅包含 Branchat 的聊天模块，也包含配套的网关服务、模型端点管理、Prompt 模板管理、运行指标接口，以及一个用于管理和调试的 React 控制台。
+可分支、可编辑、可压缩的树形对话系统。从任意 AI 回复开辟支线、原地修改历史回答继续生成、为同一轮回答保留多个变体，并在上下文过长时把早期历史压缩为摘要节点——而不是简单截断。
 
 ---
 
-## 它解决什么问题
+## 它不一样在哪
 
-普通 Chatbot 往往有两个典型问题：
+```
+普通 chatbot:    A → B → C → D → E
+                       想追问 C 里的支线问题？只能在 D 之后问，污染主线。
 
-- 你想追问某个支线问题，但一追问就把主线上下文带偏了
-- 你知道 AI 该往哪个方向回答，却只能重新提问，无法真正控制下一步上下文
+Branchat:        A → B → C → D → E       ← main
+                         ↓
+                         F → G           ← 从 C 派生的支线，独立推进
+```
 
-Branchat 重点解决的就是这两点：
+- **分支不污染主线**：从任意 AI 节点开新支线，主线指针完全不动。
+- **可控编辑**：直接修改 AI 回复，再基于修改后的内容继续生成。旧子节点标记为 stale 但完整保留。
+- **多变体共存**：同一轮回答可以保留多个兄弟节点，按需切换。
+- **压缩不破坏树**：超长会话自动把早期历史压成 summary，**只在分支级缓存**，原始树永远只读，共享祖先不会断链。
 
-- **分支对话**：从任意 AI 节点开辟新的支线，主线不受污染
-- **可控编辑**：直接修改 AI 回复，再基于修改后的内容继续生成
+想了解为什么这样设计，看：
+
+- [chatbot-branch-design](./docs/chatbot-branch-design.md) — 数据结构与核心操作
+- [branchat-compression-refactor-v4](./docs/branchat-compression-refactor-v4.md) — 压缩方案的最终设计
 
 ---
 
 ## 核心能力
 
-- **分支会话**：从任意 AI 回复创建分支，多个支线独立推进，可在分支间切换。
-- **编辑 AI 回复**：修改历史 AI 节点后继续对话，让后续朝你希望的方向前进。
-- **重新生成与变体切换**：同一轮回答可保留多个兄弟节点，按照当前可见快照生成回答。
-- **上下文压缩**：根据模型窗口大小自动压缩早期历史，对超长会话更友好。
-- **OpenAI兼容接口**：通过 `/v1/chat/completions` 和 `/v1/models` 对外提供兼容接口。
-- **模型端点管理**：统一聚合端点，并支持启停、校验、优先级与路由策略。
-- **Prompt 模板管理**：为网关和会话配置复用型 Prompt 模板，支持变量注入和预览。
-- **运行指标与日志**：提供健康检查、请求日志、统计指标和按天趋势数据。
-- **Web 控制台**：内置 React + Vite 管理台，用于配置端点、Prompt、聊天调试和 Token 管理。
+只做四件事：
+
+| 能力 | 说明 |
+| --- | --- |
+| **分支对话** | 从任意 AI 节点开辟新支线，多个支线独立推进，可在分支间切换。 |
+| **编辑历史回复** | 修改历史 AI 节点后继续对话，让后续朝你希望的方向前进。 |
+| **多变体重生** | 同一轮回答可保留多个兄弟节点，按当前可见快照生成。 |
+| **上下文压缩** | 根据模型窗口大小自动压缩早期历史，对超长会话友好。 |
+
+### 节点交互规则
+
+| 节点类型 | 可用操作 |
+| --- | --- |
+| 用户节点（叶子） | 无 |
+| AI 节点（叶子） | 编辑、重新生成、从此分叉 |
+| AI 节点（历史） | 从此分叉 |
+
+只有当前 branch 指针指向的叶子节点才能继续生成；历史节点默认只用于回看和派生新分支。
+
+### 上下文压缩档位
+
+| 档位 | 窗口大小 | 触发阈值 | 压缩范围 |
+| --- | --- | --- | --- |
+| 小窗口 | `<= 128k` | `60%` | 前 `50%` |
+| 中窗口 | `<= 256k` | `70%` | 前 `40%` |
+| 大窗口 | `> 256k` | `80%` | 前 `30%` |
+
+压缩时跳过 `pinned` 节点，结果作为分支级缓存独立存储，原始 `parent_id` 链永远只读。
 
 ---
 
-## 系统组成
+## 内置基础设施
 
-Branchat 由几块相互配合的能力组成：
+为了支撑上面这套聊天体验，仓库内置了一组较小的辅助能力。它们不是产品亮点，只是把地基做稳。
 
-- **Chat Gateway**：统一对接上游模型服务，负责路由、缓存、fallback、Prompt 注入与响应封装。
-- **Conversation Engine**：维护树形会话、分支指针、消息可见性、历史变体与上下文压缩。
-- **Endpoint Registry**：管理逻辑模型到实际上游端点的映射关系。
-- **Prompt Service**：管理模板、变量渲染、启停状态与预览。
-- **Console UI**：提供 Dashboard、Endpoint 管理、Prompt 管理与聊天调试页面。
-
+- **多端点网关**：把一个逻辑模型映射到多个真实上游端点（OpenAI 兼容服务、Ollama），按指定或轮转策略选择，失败时顺序 fallback，连续失败自动熔断冷却。
+- **Prompt 模板**：可复用、变量化的 system 提示词，在网关层注入。
+- **OpenAI 兼容出口**：顺带暴露 `/v1/chat/completions` 和 `/v1/models`，让现有客户端可以直接对接。
+- **运行指标与日志**：每次调用落一条 RequestLog，聚合指标、趋势、分页查询都基于它。
+- **React 控制台**：用于配置端点、Prompt、Token，以及 chat 调试。
 
 ---
 
 ## 快速开始
 
-### 运行要求
-
-- Python `>= 3.12`
-- 可用的 `npm`
-- 推荐安装 `uv`，未安装时脚本会回退到标准 `venv + pip`
+运行要求：Python `>= 3.12` + 可用的 `npm`，推荐安装 `uv`（脚本会自动降级到 `venv + pip`）。
 
 ### 1. 初始化配置
-
-项目根目录提供了 `config.example.toml`。如果你直接运行启动脚本，缺失的 `config.toml` 会自动创建。
-
-最少需要确认这几个配置项：
-
-- `auth_token`：控制台和受保护接口使用的 Bearer Token
-- `master_key`：用于加密存储上游 API Key，请在持久化端点前固定下来
-- `database_url`：默认使用 SQLite
-
-建议先把示例配置复制出来并修改敏感字段：
 
 ```bash
 cp config.example.toml config.toml
 ```
 
-示例：
+最少确认这三项：
 
-```toml
-[app]
-env = "development"
-database_url = "sqlite:///./data/branchat.db"
-auth_token = "replace-with-a-strong-token"
-master_key = "replace-with-a-stable-master-key"
-timezone = "Asia/Shanghai"
-```
+- `auth_token`：控制台和受保护接口使用的 Bearer Token
+- `master_key`：用于加密存储上游 API Key，**端点持久化前必须固定下来**
+- `database_url`：默认 SQLite，开箱即用
 
-### 2. 一条命令启动开发环境
+### 2. 一条命令启动
 
 ```bash
 ./scripts/start.sh
@@ -97,175 +101,53 @@ timezone = "Asia/Shanghai"
 - 后端 API：`http://127.0.0.1:8000`
 - 前端控制台：`http://127.0.0.1:3001`
 
-控制台开发模式下会把 `/api`、`/internal`、`/v1` 代理到后端服务。
-
-### 3. 分别启动前后端
-
-只启动后端：
-
-```bash
-./scripts/start_core.sh
-```
-
-只启动控制台开发服务器：
-
-```bash
-./scripts/start_console.sh
-```
-
-构建控制台并由 FastAPI 托管：
-
-```bash
-./scripts/build_console.sh
-./scripts/start_core.sh
-```
-
-构建完成后，访问 `http://127.0.0.1:8000/` 即可打开内嵌控制台。
-
----
-
-## 配置说明
-
-配置来源优先级如下：
-
-1. 环境变量
-2. `config.toml`
-3. 代码默认值
-
-常用环境变量如下：
-
-| 环境变量 | 说明 | 默认值 |
-| --- | --- | --- |
-| `BRANCHAT_CONFIG` | 配置文件路径 | `config.toml` |
-| `BRANCHAT_DATABASE_URL` | 数据库连接串 | `sqlite:///./data/branchat.db` |
-| `BRANCHAT_AUTH_TOKEN` | Bearer Token | `change-me` |
-| `BRANCHAT_MASTER_KEY` | 密钥加密主密钥 | `dev-master-key-change-me` |
-| `BRANCHAT_LOG_DIR` | 日志目录 | `data/logs` |
-| `BRANCHAT_REQUEST_TIMEOUT_SECONDS` | 上游请求超时 | `60` |
-| `BRANCHAT_CACHE_TTL_SECONDS` | 网关缓存 TTL | `300` |
-| `BRANCHAT_CACHE_TEMPERATURE_THRESHOLD` | 可参与缓存的温度阈值 | `0.3` |
-| `BRANCHAT_FAILURE_THRESHOLD` | 端点连续失败熔断阈值 | `3` |
-| `BRANCHAT_FAILURE_COOLDOWN_SECONDS` | 熔断冷却时间 | `120` |
-| `BRANCHAT_DEFAULT_STRATEGY` | 默认路由策略 | `balanced` |
-| `BRANCHAT_DEFAULT_TEMPERATURE` | 默认温度 | `0.2` |
-| `BRANCHAT_DEFAULT_MAX_TOKENS` | 默认最大输出 Token | `1024` |
-| `BRANCHAT_TIMEZONE` | 业务时区 | `Asia/Shanghai` |
-
-启动脚本额外支持这些运行时变量：
-
-| 变量 | 作用 | 默认值 |
-| --- | --- | --- |
-| `HOST` | 后端监听地址 | `127.0.0.1` |
-| `PORT` | 后端监听端口 | `8000` |
-| `RELOAD` | `start_core.sh` 是否热重载 | `1` |
-| `CORE_RELOAD` | `start.sh` 启动后端时是否热重载 | `1` |
-| `DEV_PORT` | 控制台开发端口 | `3001` |
-| `PROXY_TARGET` | 控制台代理的后端地址 | `http://127.0.0.1:8000` |
-
-安全注意事项：
-
-- `master_key` 会参与端点密钥的加解密，已有数据落库后不要随意更改。
-- 除 `/internal/health` 外，绝大多数管理接口都要求 `Authorization: Bearer <auth_token>`。
-- Endpoint 中保存的上游 `api_key` 会以加密形式存储，接口返回时只暴露脱敏值。
-
----
-
-## 使用方式
-
-### 作为 OpenAI-compatible 网关
-
-配置好至少一个可用端点后，可以把 Branchat 当作统一网关使用：
-
-- `POST /v1/chat/completions`
-- `GET /v1/models`
-
-支持的请求特性包括：
-
-- `prompt_id` + `prompt_variables`
-- `strategy`
-- `endpoint_id`
-- `disable_cache`
-- `stream`
-
-适合对接已有兼容 OpenAI Chat Completions 协议的客户端或 Agent。
-
-### 作为树形会话系统
-
-聊天能力通过 `/api/chat/*` 提供，支持：
-
-- 创建和删除会话
-- 保存会话级草稿配置
-- 发送消息与流式生成
-- 从历史节点分支
-- 编辑节点后继续生成
-- 对指定回答重新生成
-- 选择回答变体
-- 节点 pin / unpin
-- 停止当前生成
-
----
-
-## 节点交互规则
-
-| 节点类型 | 可用操作 |
-| --- | --- |
-| 用户节点（叶子） | 无 |
-| AI 节点（叶子） | 编辑、重新生成、从此分叉 |
-| AI 节点（历史） | 从此分叉 |
-
-只有当前 branch 指针指向的叶子节点才能继续生成；历史节点默认只用于回看和派生新分支。
-
----
-
-## 上下文压缩策略
-
-当会话超过模型窗口阈值时，Branchat 会将早期上下文压缩为摘要节点插入树中，而不是简单截断历史。
-
-| 档位 | 窗口大小 | 触发阈值 | 压缩范围 |
-| --- | --- | --- | --- |
-| 小窗口 | `<= 128k` | `60%` | 前 `50%` |
-| 中窗口 | `<= 256k` | `70%` | 前 `40%` |
-| 大窗口 | `> 256k` | `80%` | 前 `30%` |
-
-压缩时会跳过被 `pinned` 的节点，并将被压缩的旧节点标记为 `archived`。
+更细的启动选项、环境变量、安全注意事项与生产部署，见 [docs/operations.md](./docs/operations.md)。
 
 ---
 
 ## API 概览
 
-| 路径 | 说明 | 鉴权 |
-| --- | --- | --- |
-| `GET /internal/health` | 健康检查 | 否 |
-| `GET /internal/metrics` | 聚合指标 | 是 |
-| `GET /internal/stats` | 趋势统计 | 是 |
-| `GET /internal/logs` | 请求日志查询 | 是 |
-| `POST /v1/chat/completions` | OpenAI-compatible 聊天补全 | 是 |
-| `GET /v1/models` | 逻辑模型列表 | 是 |
-| `GET/POST/PUT/DELETE /api/endpoints` | 模型端点管理 | 是 |
-| `POST /api/endpoints/{id}/validate` | 校验端点是否可用 | 是 |
-| `GET/POST/PUT/DELETE /api/prompts` | Prompt 模板管理 | 是 |
-| `POST /api/prompts/{id}/preview` | Prompt 渲染预览 | 是 |
-| `GET/POST/PATCH/DELETE /api/chat/conversations` | 会话管理 | 是 |
-| `POST /api/chat/conversations/{id}/messages/*` | 发送、编辑、分支、重生成、流式事件 | 是 |
+### Chat（核心）
 
-如果你需要更细的字段定义，可以直接查看 FastAPI OpenAPI 文档：
+| 路径 | 说明 |
+| --- | --- |
+| `GET /api/chat/conversations` | 列出会话 |
+| `POST /api/chat/conversations` | 创建会话 |
+| `GET /api/chat/conversations/{id}` | 获取会话与消息树 |
+| `PATCH /api/chat/conversations/{id}` | 重命名 |
+| `DELETE /api/chat/conversations/{id}` | 删除 |
+| `PUT /api/chat/conversations/{id}/config` | 保存草稿配置 |
+| `POST /api/chat/conversations/{id}/messages[/stream]` | 发送消息（含流式） |
+| `POST /api/chat/conversations/{id}/messages/commit[/stream]` | 提交编辑后继续生成 |
+| `POST /api/chat/conversations/{id}/messages/{mid}/branch-edit/stream` | 编辑节点后基于修改内容生成 |
+| `POST /api/chat/conversations/{id}/messages/{mid}/regenerate/stream` | 重新生成 |
+| `POST /api/chat/conversations/{id}/messages/{mid}/stop` | 停止当前生成 |
+| `POST /api/chat/conversations/{id}/branches` | 从指定节点新建分支 |
+
+### 基础设施接口
+
+<details>
+<summary>Gateway / Endpoints / Prompts / Internal</summary>
+
+| 路径 | 说明 |
+| --- | --- |
+| `POST /v1/chat/completions` | OpenAI-compatible 聊天补全 |
+| `GET /v1/models` | 逻辑模型列表 |
+| `GET/POST/PUT/DELETE /api/endpoints` | 模型端点管理 |
+| `POST /api/endpoints/{id}/validate` | 校验端点是否可用 |
+| `GET/POST/PUT/DELETE /api/prompts` | Prompt 模板管理 |
+| `POST /api/prompts/{id}/preview` | Prompt 渲染预览 |
+| `GET /internal/health` | 健康检查（无需鉴权） |
+| `GET /internal/metrics` | 聚合指标 |
+| `GET /internal/stats` | 趋势统计 |
+| `GET /internal/logs` | 请求日志查询 |
+
+</details>
+
+完整字段定义见 FastAPI OpenAPI 文档：
 
 - [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
-
----
-
-## 控制台能力
-
-`frontend/console` 是 Branchat 自带的 React 控制台，目前主要用于：
-
-- Dashboard 概览
-- Endpoint 管理
-- Prompt 模板管理
-- Chat 调试页
-- Bearer Token 本地配置
-
-开发模式默认地址为 `http://127.0.0.1:3001`。如果 `config.toml` 中存在 `auth_token`，控制台开发启动脚本会自动读取并注入默认 Token。
 
 ---
 
@@ -289,25 +171,6 @@ timezone = "Asia/Shanghai"
 ├── config.example.toml   # 示例配置
 └── pyproject.toml        # Python 项目定义
 ```
-
----
-
-## 适用场景
-
-Branchat 适合这些场景：
-
-- 需要在主线对话之外探索多个支线问题
-- 希望把一个逻辑模型映射到多个真实上游端点，并按策略路由
-- 需要对 Prompt 模板做版本化管理、变量注入和在线调试
-- 需要一套本地可运行、可观察、可扩展的 AI 网关与聊天控制台
-
----
-
-## 相关文档
-
-- [console README](./frontend/console/README.md)
-- [chatbot-branch-design](./docs/chatbot-branch-design.md)
-- [branchat-compression-refactor](./docs/branchat-compression-refactor.md)
 
 ---
 
