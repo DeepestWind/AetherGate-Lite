@@ -47,3 +47,6 @@ pnpm-debug.log*
 .vscode/
 *.swp
 *.swo
+
+# Tooling caches
+.playwright-cli/
