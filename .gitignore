@@ -50,3 +50,4 @@ pnpm-debug.log*
 
 # Tooling caches
 .playwright-cli/
+.superpowers/
