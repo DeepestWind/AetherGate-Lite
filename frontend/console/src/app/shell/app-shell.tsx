@@ -2,13 +2,10 @@ import {
   BarChart3,
   Link2,
   MessageSquare,
-  Monitor,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Shield,
   Sparkles,
-  SunMedium,
   X
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -27,8 +24,6 @@ import {
   DialogTitle
 } from '@/shared/ui/dialog'
 import { Input } from '@/shared/ui/input'
-
-type ThemeMode = 'light' | 'dark' | 'system'
 
 const SIDEBAR_LABEL_REVEAL_MS = 130
 
@@ -74,86 +69,18 @@ const pageMeta = {
   }
 } as const
 
-const themeChoices: Array<{
-  label: string
-  mode: ThemeMode
-  icon: typeof Monitor
-}> = [
-  { label: 'System', mode: 'system', icon: Monitor },
-  { label: 'Light', mode: 'light', icon: SunMedium },
-  { label: 'Dark', mode: 'dark', icon: Moon }
-]
-
-function resolveTheme(mode: ThemeMode) {
-  if (mode !== 'system') {
-    return mode
-  }
-
-  if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    return 'dark'
-  }
-
-  return 'light'
-}
-
-function ThemeToggle({
-  compact = false,
-  themeMode,
-  onChange
-}: {
-  compact?: boolean
-  onChange: (next: ThemeMode) => void
-  themeMode: ThemeMode
-}) {
-  return (
-    <div
-      className={cn(
-        'inline-flex items-center rounded-full border border-border bg-panel shadow-card',
-        compact ? 'p-[3px]' : 'p-1'
-      )}
-    >
-      {themeChoices.map(({ label, mode, icon: Icon }) => {
-        const active = themeMode === mode
-
-        return (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => onChange(mode)}
-            className={cn(
-              'inline-flex items-center justify-center rounded-full transition',
-              compact ? 'size-6' : 'size-7',
-              active
-                ? 'bg-accent text-white shadow-[0_10px_20px_-14px_rgba(223,90,79,0.88)]'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-            )}
-            aria-label={label}
-            title={label}
-          >
-            <Icon className="size-4" />
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function DesktopSidebarFooter({
   hasHydrated,
   hasToken,
   labelVisible,
   onOpenTokenDialog,
-  onThemeChange,
-  sidebarCollapsed,
-  themeMode
+  sidebarCollapsed
 }: {
   hasHydrated: boolean
   hasToken: boolean
   labelVisible: boolean
   onOpenTokenDialog: () => void
-  onThemeChange: (next: ThemeMode) => void
   sidebarCollapsed: boolean
-  themeMode: ThemeMode
 }) {
   const compact = sidebarCollapsed || !labelVisible
 
@@ -174,10 +101,6 @@ function DesktopSidebarFooter({
         <Shield className="size-4" />
         {compact ? null : !hasHydrated ? '恢复会话中' : hasToken ? '已配置 Token' : '配置 Token'}
       </Button>
-
-      <div className={cn('flex w-full', compact ? 'justify-center' : 'justify-start')}>
-        <ThemeToggle compact={compact} themeMode={themeMode} onChange={onThemeChange} />
-      </div>
     </div>
   )
 }
@@ -341,9 +264,7 @@ export function AppShell() {
     expandSidebar,
     mobileNavOpen,
     setMobileNavOpen,
-    setThemeMode,
     sidebarCollapsed,
-    themeMode,
     toggleMobileNav
   } = useConsoleUiStore()
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
@@ -378,23 +299,6 @@ export function AppShell() {
     return pageMeta['/dashboard']
   }, [location.pathname])
   const isChatPage = location.pathname.startsWith('/chat')
-
-  useEffect(() => {
-    const applyTheme = () => {
-      document.documentElement.dataset.theme = resolveTheme(themeMode)
-    }
-
-    applyTheme()
-
-    if (themeMode !== 'system') {
-      return
-    }
-
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const handleChange = () => applyTheme()
-    media.addEventListener('change', handleChange)
-    return () => media.removeEventListener('change', handleChange)
-  }, [themeMode])
 
   useEffect(() => {
     if (!hasHydrated || hasToken || didAutoPromptForToken) {
@@ -481,7 +385,6 @@ export function AppShell() {
               <Shield className="size-4" />
               {!hasHydrated ? '恢复会话中' : token ? '已配置 Token' : '配置 Token'}
             </Button>
-            <ThemeToggle themeMode={themeMode} onChange={setThemeMode} />
           </div>
         </div>
       </header>
@@ -573,9 +476,7 @@ export function AppShell() {
             hasToken={hasToken}
             labelVisible={sidebarLabelVisible}
             onOpenTokenDialog={() => setTokenDialogOpen(true)}
-            onThemeChange={setThemeMode}
             sidebarCollapsed={sidebarCollapsed}
-            themeMode={themeMode}
           />
         </aside>
 
