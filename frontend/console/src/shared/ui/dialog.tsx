@@ -17,7 +17,7 @@ export function DialogOverlay({
 }: ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
     <DialogPrimitive.Overlay
-      className={cn('fixed inset-0 z-50 bg-[#17171d]/32 backdrop-blur-sm', className)}
+      className={cn('fixed inset-0 z-50 bg-ink/30 backdrop-blur-sm', className)}
       {...props}
     />
   )
@@ -33,13 +33,13 @@ export function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 grid w-[min(92vw,840px)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-[28px] border border-border bg-panel p-6 shadow-[0_28px_70px_-34px_rgba(23,28,38,0.45)]',
+          'fixed left-1/2 top-1/2 z-50 grid w-[min(92vw,840px)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-rule-soft bg-surface-card p-6 shadow-[0_8px_32px_rgba(0,0,0,0.12)]',
           className
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full border border-border p-2 text-muted-foreground transition hover:bg-secondary hover:text-foreground">
+        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full border border-rule-soft p-2 text-ink-soft transition hover:bg-rule-soft hover:text-ink">
           <X className="size-4" />
           <span className="sr-only">关闭</span>
         </DialogPrimitive.Close>
@@ -55,7 +55,7 @@ export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElem
 export function DialogTitle({ className, ...props }: ComponentProps<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
-      className={cn('text-2xl font-semibold tracking-tight', className)}
+      className={cn('font-serif italic text-xl text-ink', className)}
       {...props}
     />
   )
@@ -67,7 +67,7 @@ export function DialogDescription({
 }: ComponentProps<typeof DialogPrimitive.Description>) {
   return (
     <DialogPrimitive.Description
-      className={cn('text-sm leading-6 text-muted-foreground', className)}
+      className={cn('font-sans text-sm text-ink-soft mt-1', className)}
       {...props}
     />
   )
