@@ -39,7 +39,7 @@ export function DialogContent({
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full border border-rule-soft p-2 text-ink-soft transition hover:bg-rule-soft hover:text-ink">
+        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full border border-rule-soft p-2 text-ink-soft transition hover:bg-paper-shade hover:text-ink">
           <X className="size-4" />
           <span className="sr-only">关闭</span>
         </DialogPrimitive.Close>
