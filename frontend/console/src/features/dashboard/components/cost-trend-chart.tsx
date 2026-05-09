@@ -21,6 +21,14 @@ type AxisTooltipRow = {
   value?: unknown
 }
 
+const NOTEBOOK_PALETTE = {
+  primary: '#94785a',   // sand
+  secondary: '#7d9477', // moss
+  tertiary: '#6b5d44',  // ink-soft
+  grid: '#e8dfce',      // rule
+  text: '#6b5d44'       // ink-soft
+}
+
 function buildOption(data: DashboardStatPoint[]): EChartsOption {
   return {
     backgroundColor: 'transparent',
@@ -44,7 +52,7 @@ function buildOption(data: DashboardStatPoint[]): EChartsOption {
     },
     legend: {
       right: 0,
-      textStyle: { color: '#787b84' }
+      textStyle: { color: NOTEBOOK_PALETTE.text }
     },
     grid: {
       left: 56,
@@ -55,22 +63,22 @@ function buildOption(data: DashboardStatPoint[]): EChartsOption {
     xAxis: {
       type: 'category',
       data: data.map((point) => point.dateLabel),
-      axisLine: { lineStyle: { color: 'rgba(144,169,197,0.18)' } },
+      axisLine: { lineStyle: { color: NOTEBOOK_PALETTE.grid } },
       axisTick: { show: false },
-      axisLabel: { color: '#787b84' }
+      axisLabel: { color: NOTEBOOK_PALETTE.text }
     },
     yAxis: [
       {
         type: 'value',
         name: '费用(USD)',
-        nameTextStyle: { color: '#787b84' },
+        nameTextStyle: { color: NOTEBOOK_PALETTE.text },
         axisLabel: {
-          color: '#787b84',
+          color: NOTEBOOK_PALETTE.text,
           formatter: (value: number) => `$${Number(value).toFixed(4)}`
         },
         splitLine: {
           lineStyle: {
-            color: 'rgba(32,32,38,0.08)',
+            color: NOTEBOOK_PALETTE.grid,
             type: 'dashed'
           }
         }
@@ -78,8 +86,8 @@ function buildOption(data: DashboardStatPoint[]): EChartsOption {
       {
         type: 'value',
         name: '调用次数',
-        nameTextStyle: { color: '#787b84' },
-        axisLabel: { color: '#787b84' },
+        nameTextStyle: { color: NOTEBOOK_PALETTE.text },
+        axisLabel: { color: NOTEBOOK_PALETTE.text },
         splitLine: { show: false }
       }
     ],
@@ -90,8 +98,8 @@ function buildOption(data: DashboardStatPoint[]): EChartsOption {
         smooth: true,
         yAxisIndex: 0,
         data: data.map((point) => point.totalCostUsd),
-        lineStyle: { width: 3, color: '#df5a4f' },
-        itemStyle: { color: '#df5a4f' },
+        lineStyle: { width: 3, color: NOTEBOOK_PALETTE.primary },
+        itemStyle: { color: NOTEBOOK_PALETTE.primary },
         symbolSize: 7,
         areaStyle: {
           color: {
@@ -101,8 +109,8 @@ function buildOption(data: DashboardStatPoint[]): EChartsOption {
             x2: 0,
             y2: 1,
             colorStops: [
-              { offset: 0, color: 'rgba(223,90,79,0.24)' },
-              { offset: 1, color: 'rgba(223,90,79,0.02)' }
+              { offset: 0, color: 'rgba(148,120,90,0.24)' },
+              { offset: 1, color: 'rgba(148,120,90,0.02)' }
             ]
           }
         }
@@ -113,8 +121,8 @@ function buildOption(data: DashboardStatPoint[]): EChartsOption {
         smooth: true,
         yAxisIndex: 1,
         data: data.map((point) => point.totalCalls),
-        lineStyle: { width: 3, color: '#4a74da' },
-        itemStyle: { color: '#4a74da' },
+        lineStyle: { width: 3, color: NOTEBOOK_PALETTE.secondary },
+        itemStyle: { color: NOTEBOOK_PALETTE.secondary },
         symbolSize: 7
       }
     ]

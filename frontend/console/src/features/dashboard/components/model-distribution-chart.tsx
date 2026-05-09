@@ -13,10 +13,18 @@ type ModelDistributionChartProps = {
   loading?: boolean
 }
 
+const NOTEBOOK_PALETTE = {
+  primary: '#94785a',   // sand
+  secondary: '#7d9477', // moss
+  tertiary: '#6b5d44',  // ink-soft
+  grid: '#e8dfce',      // rule
+  text: '#6b5d44'       // ink-soft
+}
+
 function buildOption(data: Array<{ name: string; value: number }>): EChartsOption {
   return {
     backgroundColor: 'transparent',
-    color: ['#df5a4f', '#4a74da', '#64b5a8', '#e5a937', '#8f72d8', '#6f7d91'],
+    color: [NOTEBOOK_PALETTE.primary, NOTEBOOK_PALETTE.secondary, NOTEBOOK_PALETTE.tertiary, '#b5956a', '#a3b89c', '#8f7d5e'],
     tooltip: {
       trigger: 'item',
       formatter: '{b}: {c} 次 ({d}%)'
@@ -24,7 +32,7 @@ function buildOption(data: Array<{ name: string; value: number }>): EChartsOptio
     legend: {
       bottom: 0,
       left: 'center',
-      textStyle: { color: '#787b84' }
+      textStyle: { color: NOTEBOOK_PALETTE.text }
     },
     graphic: [
       {
@@ -34,7 +42,7 @@ function buildOption(data: Array<{ name: string; value: number }>): EChartsOptio
         silent: true,
         style: {
           text: '模型分布',
-          fill: '#787b84',
+          fill: NOTEBOOK_PALETTE.text,
           fontSize: 12,
           fontFamily: 'var(--font-sans)'
         }
@@ -53,7 +61,7 @@ function buildOption(data: Array<{ name: string; value: number }>): EChartsOptio
           position: 'outside',
           formatter: '{b}\n{d}%',
           fontSize: 11,
-          color: '#787b84'
+          color: NOTEBOOK_PALETTE.text
         },
         itemStyle: {
           borderColor: '#f4f2ee',

@@ -12,6 +12,7 @@ import { useApiAccessState } from '@/shared/auth/use-api-access'
 import { Button } from '@/shared/ui/button'
 import { AuthRequiredState } from '@/shared/ui/auth-required-state'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
+import { PageHeader } from '@/shared/ui/page-header'
 
 export function DashboardPage() {
   const { hasHydrated, hasToken } = useApiAccessState()
@@ -47,6 +48,18 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="运行指标"
+        meta={`截至 ${lastUpdatedLabel} · 24 小时统计`}
+        actions={
+          <Button
+            onClick={handleRefresh}
+            disabled={metricsQuery.isFetching || statsQuery.isFetching || logsQuery.isFetching}
+          >
+            刷新
+          </Button>
+        }
+      />
       {hasBlockingError ? (
         <Card className="border-danger/20 bg-[linear-gradient(135deg,rgba(213,78,78,0.08),rgba(213,78,78,0.03))]">
           <CardHeader>
@@ -91,16 +104,6 @@ export function DashboardPage() {
           loading={metricsQuery.isLoading}
         />
       </section>
-
-      <div className="flex items-center justify-between gap-4">
-        <div className="text-sm font-mono text-muted-foreground">更新于 {lastUpdatedLabel}</div>
-        <Button
-          onClick={handleRefresh}
-          disabled={metricsQuery.isFetching || statsQuery.isFetching || logsQuery.isFetching}
-        >
-          刷新
-        </Button>
-      </div>
 
       <section className="grid gap-5 xl:grid-cols-[1.18fr_0.82fr]">
         <Card>
