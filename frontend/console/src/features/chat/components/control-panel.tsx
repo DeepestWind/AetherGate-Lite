@@ -10,6 +10,8 @@ import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { Select } from '@/shared/ui/select'
 import { Separator } from '@/shared/ui/separator'
+import { ChevronRight } from 'lucide-react'
+import { useConsoleUiStore } from '@/shared/stores/use-console-ui-store'
 import { CallInfoPanel } from './call-info-panel'
 
 type ControlPanelProps = {
@@ -35,6 +37,9 @@ export function ControlPanel({
   onVariablesChange,
   promptTemplates
 }: ControlPanelProps) {
+  const isOpen = useConsoleUiStore((s) => s.chatControlPanelOpen)
+  const toggleOpen = useConsoleUiStore((s) => s.toggleChatControlPanel)
+
   const selectedTemplate = useMemo(
     () => promptTemplates.find((template) => template.promptId === config.promptId) ?? null,
     [config.promptId, promptTemplates]
@@ -60,20 +65,31 @@ export function ControlPanel({
   }, [config.variables, onVariablesChange, selectedTemplate])
 
   return (
-    <div className={cn('space-y-5', className)}>
-      <section className="rounded-[24px] border border-border bg-panel p-5 shadow-card">
-        <div className="mb-4">
-          <div className="text-sm font-semibold text-foreground">模型与路由</div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            当前会话使用的逻辑模型、路由策略和温度参数。
-          </p>
+    <div className={cn('border-t border-rule bg-paper-shade', className)}>
+      <button
+        type="button"
+        onClick={toggleOpen}
+        className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-paper-warm transition-colors text-left"
+        aria-expanded={isOpen}
+      >
+        <div className="flex items-baseline gap-2 min-w-0">
+          <ChevronRight
+            className={cn('size-3 text-ink-faint shrink-0 transition-transform', isOpen && 'rotate-90')}
+          />
+          <span className="font-serif italic text-xs text-ink-soft">模型设置</span>
         </div>
+        <span className="font-mono text-[10px] text-ink-faint truncate ml-2">
+          {config.model || '—'} · {config.strategy} · {config.temperature.toFixed(1)}
+        </span>
+      </button>
 
-        <div className="space-y-5">
-          <div className="space-y-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+      {isOpen ? (
+        <div className="px-4 pb-4 pt-1 border-t border-dashed border-rule space-y-3">
+          {/* Strategy */}
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-ink-faint mb-1">
               路由策略
-            </div>
+            </label>
             <div className="grid gap-2">
               {strategies.map((strategy) => (
                 <button
@@ -93,11 +109,12 @@ export function ControlPanel({
             </div>
           </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          {/* Model */}
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <label className="block text-[10px] uppercase tracking-wider text-ink-faint">
                 逻辑模型
-              </div>
+              </label>
               {config.model ? (
                 <Button variant="ghost" size="sm" onClick={() => onChange('model', '')}>
                   清空
@@ -115,17 +132,18 @@ export function ControlPanel({
                 </option>
               ))}
             </Select>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground mt-1">
               发送消息前需要先选定逻辑模型，对应 `/v1/models` 的返回值。
             </p>
           </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          {/* Temperature */}
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <label className="block text-[10px] uppercase tracking-wider text-ink-faint">
                 Temperature
-              </div>
-              <span className="font-mono text-xs text-muted-foreground">
+              </label>
+              <span className="font-mono text-xs text-ink-faint">
                 {config.temperature.toFixed(1)}
               </span>
             </div>
@@ -138,25 +156,15 @@ export function ControlPanel({
               value={config.temperature}
               onChange={(event) => onChange('temperature', Number(event.target.value))}
             />
-            <p className="text-xs text-muted-foreground">更低的值更稳定，更高的值更发散。</p>
+            <p className="text-xs text-muted-foreground mt-1">更低的值更稳定，更高的值更发散。</p>
           </div>
-        </div>
-      </section>
 
-      <section className="rounded-[24px] border border-border bg-panel p-5 shadow-card">
-        <div className="mb-4">
-          <div className="text-sm font-semibold text-foreground">Prompt 与变量</div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            需要时再注入模板，避免主聊天界面承载过多配置。
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          {/* Prompt template */}
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <label className="block text-[10px] uppercase tracking-wider text-ink-faint">
                 Prompt 模板
-              </div>
+              </label>
               {config.promptId ? (
                 <Button
                   variant="ghost"
@@ -183,6 +191,7 @@ export function ControlPanel({
             </Select>
           </div>
 
+          {/* Variables */}
           {selectedTemplate?.variables.length ? (
             <div className="space-y-3 rounded-[20px] border border-border bg-background p-4">
               {selectedTemplate.variables.map((key) => (
@@ -212,20 +221,17 @@ export function ControlPanel({
               选择 Prompt 模板后，会在这里展示需要填写的变量。
             </div>
           )}
-        </div>
-      </section>
 
-      <section className="rounded-[24px] border border-border bg-panel p-5 shadow-card">
-        <div className="mb-4">
-          <div className="text-sm font-semibold text-foreground">最近一次调用</div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            这里只保留最近一条助手消息的调用元信息。
-          </p>
+          {/* Call info */}
+          <Separator />
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-ink-faint mb-2">
+              最近一次调用
+            </label>
+            <CallInfoPanel callInfo={callInfo} showTitle={false} />
+          </div>
         </div>
-
-        <Separator className="mb-4" />
-        <CallInfoPanel callInfo={callInfo} showTitle={false} />
-      </section>
+      ) : null}
     </div>
   )
 }
