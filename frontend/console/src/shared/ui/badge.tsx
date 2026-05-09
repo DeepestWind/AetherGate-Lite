@@ -8,6 +8,7 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default: 'bg-paper-shade text-ink-soft border border-rule',
+        // accent: backward-compat alias used by enabled/active call sites; mirrors moss
         accent: 'bg-moss/10 text-moss border border-moss/20',
         sand: 'bg-sand/10 text-sand border border-sand/20',
         moss: 'bg-moss/10 text-moss border border-moss/20',
