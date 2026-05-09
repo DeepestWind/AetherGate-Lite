@@ -12,7 +12,6 @@ import {
   DialogTitle
 } from '@/shared/ui/dialog'
 import { Input } from '@/shared/ui/input'
-import { Textarea } from '@/shared/ui/textarea'
 
 type PromptPreviewDialogProps = {
   onOpenChange: (open: boolean) => void
@@ -66,7 +65,9 @@ export function PromptPreviewDialog({ onOpenChange, open, prompt }: PromptPrevie
                 {variableKeys.map((key) => (
                   <div key={key}>
                     <label htmlFor={`preview-${key}`} className="text-sm font-medium">
-                      {key}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs border border-sand/40 text-sand rounded-md font-mono">
+                        {key}
+                      </span>
                     </label>
                     <Input
                       id={`preview-${key}`}
@@ -90,12 +91,9 @@ export function PromptPreviewDialog({ onOpenChange, open, prompt }: PromptPrevie
 
             <div>
               <div className="mb-2 text-sm font-medium">渲染结果</div>
-              <Textarea
-                className="min-h-[260px] font-mono text-sm"
-                value={previewMutation.data ?? ''}
-                readOnly
-                placeholder="点击“生成预览”查看渲染结果"
-              />
+              <pre className="bg-paper-shade border border-rule rounded-lg p-4 font-mono text-sm text-ink whitespace-pre-wrap break-words min-h-[260px]">
+                {previewMutation.data ?? ''}
+              </pre>
             </div>
 
             {previewMutation.isError ? (

@@ -15,6 +15,7 @@ import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { ConfirmationDialog } from '@/shared/ui/confirmation-dialog'
 import { Input } from '@/shared/ui/input'
+import { PageHeader } from '@/shared/ui/page-header'
 
 export function PromptsPage() {
   const { hasHydrated, hasToken } = useApiAccessState()
@@ -72,24 +73,22 @@ export function PromptsPage() {
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <CardTitle className="text-[26px] tracking-[-0.04em]">Prompt 模板</CardTitle>
-          <CardDescription className="max-w-3xl">
-            为 `/v1/chat/completions` 提供可复用的 system prompt 模板，支持变量注入与预览。
-          </CardDescription>
-        </div>
-        <Button
-          onClick={() => {
-            setDialogMode('create')
-            setEditingPrompt(null)
-            setDialogOpen(true)
-          }}
-        >
-          <Plus className="size-4" />
-          新增模板
-        </Button>
-      </section>
+      <PageHeader
+        title="Prompts"
+        meta={`${prompts.length} templates · ${activeCount} active`}
+        actions={
+          <Button
+            onClick={() => {
+              setDialogMode('create')
+              setEditingPrompt(null)
+              setDialogOpen(true)
+            }}
+          >
+            <Plus className="size-4" />
+            新增模板
+          </Button>
+        }
+      />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <EndpointOverviewCard
