@@ -85,7 +85,7 @@ export function AppShell() {
           </span>
         </div>
 
-        <nav className="flex items-center gap-6 text-sm">
+        <nav aria-label="主导航" className="flex items-center gap-6 text-sm">
           {navigationItems.map((item) => (
             <NavLink
               key={item.to}
@@ -105,7 +105,7 @@ export function AppShell() {
             type="button"
             onClick={() => setTokenDialogOpen(true)}
             className="ml-2 p-1.5 text-ink-soft hover:text-ink rounded-md hover:bg-paper-shade transition-colors"
-            aria-label="Settings"
+            aria-label="设置"
           >
             <Settings className="size-4" />
           </button>
@@ -153,7 +153,7 @@ export function AppShell() {
       {/* Mobile nav drawer */}
       {mobileNavOpen ? (
         <aside className="fixed left-0 top-[61px] bottom-0 z-30 w-[248px] flex flex-col border-r border-border bg-background/98 px-3 py-4 lg:hidden">
-          <nav className="min-h-0 flex-1 overflow-y-auto">
+          <nav aria-label="主导航" className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-1">
               {navigationItems.map((item) => (
                 <NavLink
@@ -188,8 +188,8 @@ export function AppShell() {
       <div
         className={cn(
           isChatPage
-            ? 'h-[calc(100vh-56px)] min-h-0 overflow-hidden'
-            : 'min-h-[calc(100vh-56px)]'
+            ? 'h-[calc(100vh-60px)] lg:h-[calc(100vh-56px)] min-h-0 overflow-hidden'
+            : 'min-h-[calc(100vh-60px)] lg:min-h-[calc(100vh-56px)]'
         )}
       >
         <main
