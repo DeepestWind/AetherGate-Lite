@@ -15,7 +15,7 @@ import { useEndpointsUiStore } from '@/features/endpoints/stores/use-endpoints-u
 import { useApiAccessState } from '@/shared/auth/use-api-access'
 import { AuthRequiredState } from '@/shared/ui/auth-required-state'
 import { Button } from '@/shared/ui/button'
-import { CardDescription, CardTitle } from '@/shared/ui/card'
+import { PageHeader } from '@/shared/ui/page-header'
 
 function resolveLogicalModel(endpoint: Endpoint) {
   return endpoint.logicalModel || endpoint.modelName || '未命名模型'
@@ -132,20 +132,15 @@ export function EndpointsPage() {
     )
   }
 
+  const total = endpoints.length
+
   return (
     <div className="space-y-6">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <CardTitle className="text-[26px] tracking-[-0.04em]">Endpoint 管理</CardTitle>
-          <CardDescription className="max-w-3xl">
-            管理 AI 模型接入点，保持 URL、Key、模型映射和调度策略的一致配置。
-          </CardDescription>
-        </div>
-        <Button onClick={openCreateDialog}>
-          <Plus className="size-4" />
-          新增 Endpoint
-        </Button>
-      </section>
+      <PageHeader
+        title="Endpoints"
+        meta={`${total} endpoints · ${enabledCount} enabled`}
+        actions={<Button onClick={openCreateDialog}>+ 新建</Button>}
+      />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <EndpointOverviewCard
