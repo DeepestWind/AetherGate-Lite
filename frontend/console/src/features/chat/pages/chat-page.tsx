@@ -147,6 +147,28 @@ export function ChatPage() {
 
   const [focusedId, setFocusedId] = useState<string | null>(null)
 
+  useEffect(() => {
+    const root = document.querySelector('[data-chat-message-list]')
+    if (!root) return
+    const elements = Array.from(root.querySelectorAll('[data-message-id]'))
+    if (elements.length === 0) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        if (visible) {
+          const id = (visible.target as HTMLElement).dataset.messageId
+          if (id) setFocusedId(id)
+        }
+      },
+      { root, threshold: [0.5] }
+    )
+    for (const element of elements) observer.observe(element)
+    return () => observer.disconnect()
+  }, [session.messages.length])
+
   function handleNodeClick(node: TreeNode) {
     if (node.kind === 'summary') return
     const element = document.querySelector(`[data-message-id="${node.id}"]`)
