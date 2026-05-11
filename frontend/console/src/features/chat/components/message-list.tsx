@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { chatStarterPrompts } from '@/features/chat/chat-page-utils'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { MessageBubble } from './message-bubble'
+import { SummaryNode } from './summary-node'
 
 type MessageListProps = {
   messages: ChatMessage[]
@@ -145,21 +146,35 @@ export function MessageList({
         </div>
       ) : (
         <div className="mx-auto w-full max-w-[820px] space-y-8 px-4 py-8 sm:px-6">
-          {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              onBranchMessage={onBranchMessage}
-              onEditMessage={onEditMessage}
-              onRegenerateMessage={onRegenerateMessage}
-              onSelectSiblingMessage={onSelectSiblingMessage}
-              siblingIndex={siblingMeta[message.id]?.index ?? 0}
-              siblingCount={siblingMeta[message.id]?.total ?? 1}
-              previousSiblingId={siblingMeta[message.id]?.previousId ?? null}
-              nextSiblingId={siblingMeta[message.id]?.nextId ?? null}
-              onTogglePinMessage={onTogglePinMessage}
-            />
-          ))}
+          {messages.map((message) => {
+            if (message.kind === 'summary') {
+              const archivedMessages = (message.archivedNodeIds ?? [])
+                .map((id) => messageNodes[id])
+                .filter((value): value is ChatMessage => Boolean(value))
+              return (
+                <SummaryNode
+                  key={message.id}
+                  message={message}
+                  archivedMessages={archivedMessages}
+                />
+              )
+            }
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                onBranchMessage={onBranchMessage}
+                onEditMessage={onEditMessage}
+                onRegenerateMessage={onRegenerateMessage}
+                onSelectSiblingMessage={onSelectSiblingMessage}
+                siblingIndex={siblingMeta[message.id]?.index ?? 0}
+                siblingCount={siblingMeta[message.id]?.total ?? 1}
+                previousSiblingId={siblingMeta[message.id]?.previousId ?? null}
+                nextSiblingId={siblingMeta[message.id]?.nextId ?? null}
+                onTogglePinMessage={onTogglePinMessage}
+              />
+            )
+          })}
         </div>
       )}
     </div>
