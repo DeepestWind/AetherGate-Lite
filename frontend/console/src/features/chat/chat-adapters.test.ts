@@ -81,6 +81,151 @@ describe('chat adapters', () => {
     })
   })
 
+  describe('summary archivedNodeIds adaptation', () => {
+    it('maps source_node_ids to archivedNodeIds on summary visible messages', () => {
+      const session = normalizeChatSession({
+        id: 'conv_2',
+        title: '摘要测试',
+        draft_config: {
+          model: 'gpt-lite',
+          prompt_id: '',
+          strategy: 'balanced',
+          temperature: 0,
+          variables: {}
+        },
+        active_branch_id: 'branch_main',
+        branches: [
+          {
+            id: 'branch_main',
+            name: 'main',
+            head_message_id: 'msg_3',
+            base_message_id: 'msg_1'
+          }
+        ],
+        message_nodes: {
+          msg_1: { id: 'msg_1', role: 'user', content: 'q1', status: 'completed', timestamp: 1000, parent_id: null },
+          msg_2: { id: 'msg_2', role: 'assistant', content: 'a1', status: 'completed', timestamp: 2000, parent_id: 'msg_1' },
+          msg_3: { id: 'msg_3', role: 'user', content: 'q2', status: 'completed', timestamp: 3000, parent_id: 'msg_2' }
+        },
+        visible_messages: [
+          {
+            virtual_id: 'summary:branch_main:msg_3:0',
+            kind: 'summary',
+            role: 'summary',
+            content: '摘要内容',
+            source_node_id: null,
+            source_node_ids: ['msg_a', 'msg_b', 'msg_c'],
+            timestamp: 1500
+          },
+          {
+            virtual_id: 'msg_3',
+            kind: 'node',
+            role: 'user',
+            content: 'q2',
+            source_node_id: 'msg_3',
+            source_node_ids: null,
+            timestamp: 3000
+          }
+        ]
+      })
+
+      const summaryMessage = session.messages[0]
+      expect(summaryMessage?.kind).toBe('summary')
+      expect(summaryMessage?.archivedNodeIds).toEqual(['msg_a', 'msg_b', 'msg_c'])
+    })
+
+    it('leaves archivedNodeIds undefined when source_node_ids is null', () => {
+      const session = normalizeChatSession({
+        id: 'conv_3',
+        title: '空摘要测试',
+        draft_config: {
+          model: 'gpt-lite',
+          prompt_id: '',
+          strategy: 'balanced',
+          temperature: 0,
+          variables: {}
+        },
+        active_branch_id: 'branch_main',
+        branches: [
+          {
+            id: 'branch_main',
+            name: 'main',
+            head_message_id: 'msg_2',
+            base_message_id: 'msg_1'
+          }
+        ],
+        message_nodes: {
+          msg_1: { id: 'msg_1', role: 'user', content: 'q1', status: 'completed', timestamp: 1000, parent_id: null },
+          msg_2: { id: 'msg_2', role: 'assistant', content: 'a1', status: 'completed', timestamp: 2000, parent_id: 'msg_1' }
+        },
+        visible_messages: [
+          {
+            virtual_id: 'summary:branch_main:msg_2:0',
+            kind: 'summary',
+            role: 'summary',
+            content: '摘要',
+            source_node_id: null,
+            source_node_ids: null,
+            timestamp: 1500
+          },
+          {
+            virtual_id: 'msg_2',
+            kind: 'node',
+            role: 'assistant',
+            content: 'a1',
+            source_node_id: 'msg_2',
+            timestamp: 2000
+          }
+        ]
+      })
+
+      const summaryMessage = session.messages[0]
+      expect(summaryMessage?.kind).toBe('summary')
+      expect(summaryMessage?.archivedNodeIds).toBeUndefined()
+    })
+
+    it('leaves archivedNodeIds undefined on node-kind visible messages', () => {
+      const session = normalizeChatSession({
+        id: 'conv_4',
+        title: '节点测试',
+        draft_config: {
+          model: 'gpt-lite',
+          prompt_id: '',
+          strategy: 'balanced',
+          temperature: 0,
+          variables: {}
+        },
+        active_branch_id: 'branch_main',
+        branches: [
+          {
+            id: 'branch_main',
+            name: 'main',
+            head_message_id: 'msg_1',
+            base_message_id: 'msg_1'
+          }
+        ],
+        message_nodes: {
+          msg_1: { id: 'msg_1', role: 'user', content: 'q1', status: 'completed', timestamp: 1000, parent_id: null }
+        },
+        visible_messages: [
+          {
+            virtual_id: 'msg_1',
+            kind: 'node',
+            role: 'user',
+            content: 'q1',
+            source_node_id: 'msg_1',
+            source_node_ids: null,
+            timestamp: 1000
+          }
+        ]
+      })
+
+      const nodeMessage = session.messages[0]
+      expect(nodeMessage?.kind).toBe('node')
+      expect(nodeMessage?.archivedNodeIds).toBeUndefined()
+    })
+  })
+
   it('prefers visible_messages for the main chat list while keeping raw nodes intact', () => {
     const session = normalizeChatSession({
       id: 'conv_1',

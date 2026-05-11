@@ -289,6 +289,8 @@ function normalizeVisibleChatMessage(
   const kind = String(readValue(row, ['kind'], 'node')) as ChatMessage['kind']
   const sourceNodeId =
     String(readValue(row, ['sourceNodeId', 'source_node_id'], '')) || null
+  const rawSourceNodeIds = row['source_node_ids'] ?? row['sourceNodeIds']
+  const archivedNodeIds = Array.isArray(rawSourceNodeIds) ? (rawSourceNodeIds as string[]) : undefined
 
   if (kind === 'node' && sourceNodeId && messageNodes[sourceNodeId]) {
     const node = messageNodes[sourceNodeId]
@@ -310,6 +312,7 @@ function normalizeVisibleChatMessage(
     timestamp: toNumber(readValue(row, ['timestamp'], Date.now())),
     parentId: null,
     sourceNodeId,
+    archivedNodeIds,
     modifiedFrom: null,
     pinned: false,
     archived: false,

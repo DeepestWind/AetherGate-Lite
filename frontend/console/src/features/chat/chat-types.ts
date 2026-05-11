@@ -33,6 +33,7 @@ export type ChatMessage = {
   archived: boolean
   stale: boolean
   role: ChatRole
+  archivedNodeIds?: string[]
   sourceNodeId?: string | null
   status: ChatMessageStatus
   timestamp: number
