@@ -5,6 +5,7 @@ import type { ChatMessage, TreeNode } from '@/features/chat/chat-types'
 import { defaultChatConfig } from '@/features/chat/chat-types'
 import { buildTreeView } from '@/features/chat/chat-adapters'
 import { AdvancedSettingsDrawer } from '@/features/chat/components/advanced-settings-drawer'
+import { ChatEmptyState } from '@/features/chat/components/empty-state'
 import { CollapseRail } from '@/features/chat/components/collapse-rail'
 import { ControlPanel } from '@/features/chat/components/control-panel'
 import { InputArea } from '@/features/chat/components/input-area'
@@ -21,6 +22,7 @@ import { AuthRequiredState } from '@/shared/ui/auth-required-state'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ConfirmationDialog } from '@/shared/ui/confirmation-dialog'
+import { PageHeader } from '@/shared/ui/page-header'
 import { Select } from '@/shared/ui/select'
 
 type PendingConfirmation = {
@@ -296,6 +298,14 @@ export function ChatPage() {
     )
   }
 
+  if (session.sessions.length === 0) {
+    return (
+      <div className="h-full flex bg-paper">
+        <ChatEmptyState onCreate={() => void handleCreateSession()} />
+      </div>
+    )
+  }
+
   return (
     <div className="h-full flex bg-paper">
       {/* Left column */}
@@ -330,56 +340,42 @@ export function ChatPage() {
 
       {/* Middle column — main reading area + input */}
       <main className="flex-1 flex flex-col min-w-0 bg-paper">
-        <header className="flex items-center justify-between gap-4 border-b border-border bg-background/96 px-4 py-4 sm:px-6">
-          <div className="min-w-0">
+        <PageHeader
+          title={session.activeSession?.title ?? '新对话'}
+          meta={`${activeBranchName} · ${Object.keys(session.activeSession?.messageNodes ?? {}).length} nodes · ${branchCount} branches`}
+          actions={
             <div className="flex items-center gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-[22px] font-semibold tracking-[-0.05em] text-foreground">
-                  {session.activeSession?.title ?? '新对话'}
-                </div>
-                <p className="mt-1 truncate text-sm text-muted-foreground">
-                  {session.messages.length
-                    ? `${session.messages.length} 条消息`
-                    : '从左侧选择会话，或直接开始新的提问。'}
-                </p>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2 rounded-full border border-border bg-panel px-2 py-1">
-                    <GitBranch className="size-3.5" />
-                    <span>分支</span>
-                    <Select
-                      value={session.activeSession?.activeBranchId ?? ''}
-                      onChange={(event) => void handleSelectBranch(event.target.value)}
-                      className="h-8 min-w-[132px] border-0 bg-transparent px-2 py-0 text-xs shadow-none focus:ring-0"
-                      disabled={(session.activeSession?.branches.length ?? 0) <= 1}
-                    >
-                      {(session.activeSession?.branches ?? []).map((branch) => (
-                        <option key={branch.id} value={branch.id}>
-                          {branch.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <span>{branchCount} 条路径已载入</span>
-                  <span>当前 {activeBranchName}</span>
-                  {pendingEditCount > 0 ? <span>{pendingEditCount} 处修改待提交</span> : null}
-                </div>
+              <div className="flex items-center gap-2 rounded-full border border-rule bg-paper-warm px-2 py-1 text-xs text-ink-soft">
+                <GitBranch className="size-3.5" />
+                <span>分支</span>
+                <Select
+                  value={session.activeSession?.activeBranchId ?? ''}
+                  onChange={(event) => void handleSelectBranch(event.target.value)}
+                  className="h-7 min-w-[120px] border-0 bg-transparent px-2 py-0 text-xs shadow-none focus:ring-0"
+                  disabled={(session.activeSession?.branches.length ?? 0) <= 1}
+                >
+                  {(session.activeSession?.branches ?? []).map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </Select>
               </div>
+              {pendingEditCount > 0 ? (
+                <span className="text-xs text-ink-soft">{pendingEditCount} 处修改待提交</span>
+              ) : null}
+              {config.model ? (
+                <Badge variant="outline" className="hidden sm:inline-flex">
+                  {config.model}
+                </Badge>
+              ) : null}
+              <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+                <Settings2 className="size-4" />
+                高级设置
+              </Button>
             </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {config.model ? (
-              <Badge variant="outline" className="hidden sm:inline-flex">
-                {config.model}
-              </Badge>
-            ) : null}
-
-            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
-              <Settings2 className="size-4" />
-              高级设置
-            </Button>
-          </div>
-        </header>
+          }
+        />
 
         {modelsQuery.isError || promptsQuery.isError ? (
           <div className="border-b border-border bg-warning/10 px-4 py-3 text-sm text-warning sm:px-6">
