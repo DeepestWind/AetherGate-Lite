@@ -27,7 +27,7 @@ describe('InputArea', () => {
     expect(onStop).not.toHaveBeenCalled()
   })
 
-  it('stops on Enter while streaming', () => {
+  it('shows stop button while streaming and calls onStop when clicked', () => {
     const onSend = vi.fn()
     const onStop = vi.fn()
 
@@ -42,8 +42,8 @@ describe('InputArea', () => {
       />
     )
 
-    const textarea = screen.getByPlaceholderText('给 Branchat 发送消息')
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    const stopButton = screen.getByRole('button', { name: /停止生成/ })
+    fireEvent.click(stopButton)
 
     expect(onSend).not.toHaveBeenCalled()
     expect(onStop).toHaveBeenCalledTimes(1)

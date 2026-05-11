@@ -1,4 +1,3 @@
-import { SendHorizontal } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { Button } from '@/shared/ui/button'
@@ -46,45 +45,64 @@ export function InputArea({ onChange, onSend, onStop, sendDisabled, sending, val
   })
 
   return (
-    <div className="border-t border-border bg-background px-4 pb-5 pt-4 sm:px-6">
-      <div className="mx-auto max-w-[820px] rounded-[28px] border border-border bg-panel px-4 py-3 shadow-[0_16px_50px_-40px_rgba(15,23,42,0.25)]">
-        <Textarea
-          ref={textareaRef}
-          data-chat-composer
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          placeholder="给 Branchat 发送消息"
-          className="min-h-[56px] max-h-[240px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-1 text-[15px] leading-7 focus:border-transparent focus:ring-0"
-        />
-
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="min-h-4 text-xs text-muted-foreground">
-            {focused || !value ? 'Enter 发送 · Shift+Enter 换行' : null}
+    <div className="border-t border-rule bg-paper-warm px-9 py-3.5">
+      {sending ? (
+        <div className="flex items-center gap-3">
+          <div className="flex-1 px-3 py-2 text-xs text-ink-faint italic font-serif">
+            — 生成中 —
           </div>
+          <button
+            type="button"
+            onClick={onStop}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-sand text-sand hover:bg-sand/5 text-xs transition"
+          >
+            ⏹ 停止生成
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Textarea
+            ref={textareaRef}
+            data-chat-composer
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder="给 Branchat 发送消息"
+            className="min-h-[40px] max-h-[240px] resize-none overflow-y-auto"
+            rows={1}
+          />
 
-          <div className="flex items-center gap-3">
-            {showCharCount ? (
-              <span
-                className={cn(
-                  'font-mono text-xs text-muted-foreground',
-                  charCount > WARNING_THRESHOLD && 'text-warning',
-                  charCount > MAX_MESSAGE_LENGTH && 'text-danger'
-                )}
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-h-4 text-xs text-ink-faint">
+              {focused || !value ? 'Enter 发送 · Shift+Enter 换行' : null}
+            </div>
+
+            <div className="flex items-center gap-3">
+              {showCharCount ? (
+                <span
+                  className={cn(
+                    'font-mono text-xs text-ink-faint',
+                    charCount > WARNING_THRESHOLD && 'text-warning',
+                    charCount > MAX_MESSAGE_LENGTH && 'text-danger'
+                  )}
+                >
+                  {charCount}/{MAX_MESSAGE_LENGTH}
+                </span>
+              ) : null}
+
+              <Button
+                size="sm"
+                onClick={onSend}
+                disabled={sendDisabled}
               >
-                {charCount}/{MAX_MESSAGE_LENGTH}
-              </span>
-            ) : null}
-
-            <Button onClick={sending ? onStop : onSend} disabled={sending ? false : sendDisabled}>
-              <SendHorizontal className="size-4" />
-              {sending ? '停止生成' : '发送'}
-            </Button>
+                ↵ 发送
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
