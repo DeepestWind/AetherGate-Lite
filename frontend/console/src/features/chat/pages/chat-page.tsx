@@ -1,12 +1,14 @@
-import { ChevronRight, GitBranch, Settings2 } from 'lucide-react'
+import { GitBranch, Settings2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import type { ChatMessage } from '@/features/chat/chat-types'
+import type { ChatMessage, TreeNode } from '@/features/chat/chat-types'
 import { defaultChatConfig } from '@/features/chat/chat-types'
+import { buildTreeView } from '@/features/chat/chat-adapters'
 import { AdvancedSettingsDrawer } from '@/features/chat/components/advanced-settings-drawer'
 import { CollapseRail } from '@/features/chat/components/collapse-rail'
 import { ControlPanel } from '@/features/chat/components/control-panel'
 import { InputArea } from '@/features/chat/components/input-area'
+import { MarginaliaPanel } from '@/features/chat/components/marginalia-panel'
 import { MessageList } from '@/features/chat/components/message-list'
 import { SessionSidebar } from '@/features/chat/components/session-sidebar'
 import { useChatSession } from '@/features/chat/hooks/use-chat-session'
@@ -127,6 +129,34 @@ export function ChatPage() {
     () => [...session.sessions].sort((left, right) => right.updatedAt - left.updatedAt),
     [session.sessions]
   )
+
+  const tree = useMemo(
+    () =>
+      buildTreeView({
+        messageNodes: session.activeSession?.messageNodes ?? {},
+        visibleMessages: session.messages,
+        activeBranchHeadId: session.activeSession?.activeBranch?.headMessageId ?? null
+      }),
+    [session.activeSession?.messageNodes, session.messages, session.activeSession?.activeBranch?.headMessageId]
+  )
+
+  const pinnedMessages = useMemo(() => {
+    const nodes = session.activeSession?.messageNodes ?? {}
+    return Object.values(nodes).filter((node) => node.pinned)
+  }, [session.activeSession?.messageNodes])
+
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+
+  function handleNodeClick(node: TreeNode) {
+    if (node.kind === 'summary') return
+    const element = document.querySelector(`[data-message-id="${node.id}"]`)
+    if (element instanceof HTMLElement) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      element.classList.add('chat-msg-flash')
+      setTimeout(() => element.classList.remove('chat-msg-flash'), 250)
+    }
+  }
+
   const activeBranchName = session.activeSession?.activeBranch?.name ?? 'main'
   const branchCount = session.activeSession?.branches.length ?? 0
   const pendingEditCount = session.pendingEditCount
@@ -359,7 +389,7 @@ export function ChatPage() {
         </div>
       </main>
 
-      {/* Right column — tree panel placeholder (real MarginaliaPanel comes in Task 24) */}
+      {/* Right column — tree panel */}
       {rightCollapsed ? (
         <CollapseRail side="right" onToggle={toggleRight} />
       ) : (
@@ -367,20 +397,14 @@ export function ChatPage() {
           className="bg-paper-warm border-l border-rule flex flex-col shrink-0"
           style={{ width: 240 }}
         >
-          <div className="px-3.5 pt-3 pb-2 border-b border-rule-soft flex items-center justify-between">
-            <span className="font-serif italic text-xs text-ink-soft">树形检视</span>
-            <button
-              type="button"
-              onClick={toggleRight}
-              className="text-ink-faint hover:text-ink"
-              aria-label="收起树形检视"
-            >
-              <ChevronRight className="size-3.5" />
-            </button>
-          </div>
-          <div className="p-4 text-xs text-ink-faint italic font-serif">
-            Tree panel coming in Task 24
-          </div>
+          <MarginaliaPanel
+            tree={tree}
+            pinnedMessages={pinnedMessages}
+            focusedId={focusedId}
+            onCollapse={toggleRight}
+            onNodeClick={handleNodeClick}
+            onNodeHover={(n) => setFocusedId(n?.id ?? null)}
+          />
         </aside>
       )}
 

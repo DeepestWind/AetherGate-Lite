@@ -247,3 +247,11 @@
     @apply mr-2 align-middle accent-accent;
   }
 }
+
+.chat-msg-flash {
+  animation: chat-msg-flash 220ms ease-out;
+}
+@keyframes chat-msg-flash {
+  0%   { box-shadow: inset 2px 0 0 0 var(--sand); }
+  100% { box-shadow: inset 2px 0 0 0 transparent; }
+}
