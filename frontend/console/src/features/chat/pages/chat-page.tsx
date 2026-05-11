@@ -1,10 +1,11 @@
-import { GitBranch, PanelLeftOpen, Settings2 } from 'lucide-react'
+import { ChevronRight, GitBranch, Settings2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { defaultChatConfig } from '@/features/chat/chat-types'
 import { AdvancedSettingsDrawer } from '@/features/chat/components/advanced-settings-drawer'
-import { ConversationTreePanel } from '@/features/chat/components/conversation-tree-panel'
+import { CollapseRail } from '@/features/chat/components/collapse-rail'
+import { ControlPanel } from '@/features/chat/components/control-panel'
 import { InputArea } from '@/features/chat/components/input-area'
 import { MessageList } from '@/features/chat/components/message-list'
 import { SessionSidebar } from '@/features/chat/components/session-sidebar'
@@ -13,7 +14,7 @@ import { useChatModelsQuery } from '@/features/chat/queries/use-chat-models-quer
 import { useChatPromptsQuery } from '@/features/chat/queries/use-chat-prompts-query'
 import { useChatUiStore } from '@/features/chat/stores/use-chat-ui-store'
 import { useApiAccessState } from '@/shared/auth/use-api-access'
-import { cn } from '@/shared/lib/cn'
+import { useConsoleUiStore } from '@/shared/stores/use-console-ui-store'
 import { AuthRequiredState } from '@/shared/ui/auth-required-state'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -37,12 +38,33 @@ export function ChatPage() {
   const session = useChatSession(hasToken)
   const { config, inputDraft, setConfig, setConfigField, setInputDraft, setVariables } =
     useChatUiStore()
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null)
   const saveDraftConfigRef = useRef(session.saveDraftConfig)
   const lastSyncedSessionIdRef = useRef<string | null>(null)
+
+  const leftCollapsed = useConsoleUiStore((s) => s.chatLeftCollapsed)
+  const rightCollapsed = useConsoleUiStore((s) => s.chatRightCollapsed)
+  const toggleLeft = useConsoleUiStore((s) => s.toggleChatLeft)
+  const toggleRight = useConsoleUiStore((s) => s.toggleChatRight)
+
+  // Responsive auto-collapse
+  useEffect(() => {
+    const setLeft = useConsoleUiStore.getState().setChatLeftCollapsed
+    const setRight = useConsoleUiStore.getState().setChatRightCollapsed
+    function handleResize() {
+      const width = window.innerWidth
+      if (width < 768) {
+        setLeft(true)
+        setRight(true)
+      } else if (width < 1024) {
+        setRight(true)
+      }
+    }
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   useEffect(() => {
     saveDraftConfigRef.current = session.saveDraftConfig
@@ -105,7 +127,6 @@ export function ChatPage() {
     () => [...session.sessions].sort((left, right) => right.updatedAt - left.updatedAt),
     [session.sessions]
   )
-  const desktopChatSidebarVisible = desktopSidebarOpen
   const activeBranchName = session.activeSession?.activeBranch?.name ?? 'main'
   const branchCount = session.activeSession?.branches.length ?? 0
   const pendingEditCount = session.pendingEditCount
@@ -125,12 +146,10 @@ export function ChatPage() {
 
   const handleCreateSession = async () => {
     await session.createSession(config)
-    setMobileSidebarOpen(false)
   }
 
   const handleSelectSession = (sessionId: string) => {
     void session.selectSession(sessionId)
-    setMobileSidebarOpen(false)
   }
 
   const handleDeleteSession = (sessionId: string) => {
@@ -138,7 +157,7 @@ export function ChatPage() {
 
     setPendingConfirmation({
       confirmLabel: '删除会话',
-      description: `会话“${targetSession?.title ?? '未命名会话'}”及其中的消息会被永久删除，且无法恢复。`,
+      description: `会话"${targetSession?.title ?? '未命名会话'}"及其中的消息会被永久删除，且无法恢复。`,
       onConfirm: () => session.deleteSession(sessionId),
       title: '删除这个会话？',
       tone: 'danger'
@@ -208,15 +227,6 @@ export function ChatPage() {
     }
   }
 
-  const handleOpenChatSidebar = () => {
-    if (window.innerWidth < 1024) {
-      setMobileSidebarOpen((current) => !current)
-      return
-    }
-
-    setDesktopSidebarOpen(true)
-  }
-
   if (!hasHydrated || session.initializing) {
     return <div className="flex-1 animate-pulse bg-secondary" />
   }
@@ -230,55 +240,42 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 overflow-hidden bg-background">
-      {mobileSidebarOpen ? (
-        <button
-          type="button"
-          className="fixed inset-x-0 bottom-0 top-[61px] z-20 bg-[#101216]/18 backdrop-blur-[1px] lg:hidden"
-          aria-label="关闭会话面板"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
-      ) : null}
-
-      <aside
-        className={cn(
-          'fixed bottom-0 left-0 top-[61px] z-30 max-w-[calc(100vw-32px)] border-r border-border bg-[#fcfcfb] transition-[transform,width,border-color,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:static lg:top-0 lg:z-0 lg:h-full lg:max-w-none lg:shrink-0 lg:overflow-hidden',
-          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-          desktopChatSidebarVisible
-            ? 'w-[280px] opacity-100'
-            : 'lg:w-0 lg:border-r-0 lg:opacity-0 lg:pointer-events-none'
-        )}
-      >
-        <div className="h-full w-[280px] max-w-[calc(100vw-32px)]">
-          <SessionSidebar
-            activeSessionId={session.activeSessionId}
-            onCreate={() => void handleCreateSession()}
-            onCollapse={() => setDesktopSidebarOpen(false)}
-            onDelete={handleDeleteSession}
-            onRename={handleRenameSession}
-            onSelect={handleSelectSession}
-            sending={session.sending}
-            sessions={orderedSessions}
+    <div className="h-full flex bg-paper">
+      {/* Left column */}
+      {leftCollapsed ? (
+        <CollapseRail side="left" onToggle={toggleLeft} />
+      ) : (
+        <aside
+          className="bg-paper-warm border-r border-rule flex flex-col shrink-0"
+          style={{ width: 220 }}
+        >
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <SessionSidebar
+              activeSessionId={session.activeSessionId}
+              onCreate={() => void handleCreateSession()}
+              onDelete={handleDeleteSession}
+              onRename={handleRenameSession}
+              onSelect={handleSelectSession}
+              sending={session.sending}
+              sessions={orderedSessions}
+            />
+          </div>
+          <ControlPanel
+            availableModels={modelsQuery.data ?? []}
+            callInfo={session.lastCallInfo}
+            config={config}
+            onChange={setConfigField}
+            onVariablesChange={setVariables}
+            promptTemplates={promptsQuery.data ?? []}
           />
-        </div>
-      </aside>
+        </aside>
+      )}
 
-      <section className="flex min-w-0 flex-1 bg-background">
-        <div className="flex min-w-0 flex-1 flex-col">
+      {/* Middle column — main reading area + input */}
+      <main className="flex-1 flex flex-col min-w-0 bg-paper">
         <header className="flex items-center justify-between gap-4 border-b border-border bg-background/96 px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={cn(desktopChatSidebarVisible && 'lg:hidden')}
-                onClick={handleOpenChatSidebar}
-                aria-label="展开聊天栏"
-              >
-                <PanelLeftOpen className="size-4" />
-              </Button>
-
               <div className="min-w-0">
                 <div className="truncate text-[22px] font-semibold tracking-[-0.05em] text-foreground">
                   {session.activeSession?.title ?? '新对话'}
@@ -360,15 +357,32 @@ export function ChatPage() {
             onStop={() => void session.stopChat()}
           />
         </div>
-        </div>
+      </main>
 
-        <ConversationTreePanel
-          activeBranchId={session.activeSession?.activeBranchId ?? null}
-          branches={session.activeSession?.branches ?? []}
-          messageNodes={session.activeSession?.messageNodes ?? {}}
-          onSelectBranch={(branchId) => void handleSelectBranch(branchId)}
-        />
-      </section>
+      {/* Right column — tree panel placeholder (real MarginaliaPanel comes in Task 24) */}
+      {rightCollapsed ? (
+        <CollapseRail side="right" onToggle={toggleRight} />
+      ) : (
+        <aside
+          className="bg-paper-warm border-l border-rule flex flex-col shrink-0"
+          style={{ width: 240 }}
+        >
+          <div className="px-3.5 pt-3 pb-2 border-b border-rule-soft flex items-center justify-between">
+            <span className="font-serif italic text-xs text-ink-soft">树形检视</span>
+            <button
+              type="button"
+              onClick={toggleRight}
+              className="text-ink-faint hover:text-ink"
+              aria-label="收起树形检视"
+            >
+              <ChevronRight className="size-3.5" />
+            </button>
+          </div>
+          <div className="p-4 text-xs text-ink-faint italic font-serif">
+            Tree panel coming in Task 24
+          </div>
+        </aside>
+      )}
 
       <AdvancedSettingsDrawer
         availableModels={modelsQuery.data ?? []}
