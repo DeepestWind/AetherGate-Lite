@@ -125,6 +125,18 @@ export type ChatHistoryMessage = {
   role: Extract<ChatRole, 'assistant' | 'user'>
 }
 
+export type TreeNodeState = 'current' | 'sibling' | 'stale' | 'archived'
+
+export type TreeNode = {
+  id: string
+  kind: 'node' | 'summary'
+  role: ChatRole
+  parentId: string | null
+  state: TreeNodeState
+  preview: string
+  depth: number
+}
+
 export type PromptTemplate = {
   description: string
   id: string

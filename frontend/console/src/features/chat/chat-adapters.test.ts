@@ -1,4 +1,5 @@
 import {
+  buildTreeView,
   normalizeAvailableModels,
   normalizeChatResponse,
   normalizeChatSession,
@@ -223,6 +224,132 @@ describe('chat adapters', () => {
       const nodeMessage = session.messages[0]
       expect(nodeMessage?.kind).toBe('node')
       expect(nodeMessage?.archivedNodeIds).toBeUndefined()
+    })
+  })
+
+  describe('buildTreeView', () => {
+    function makeNode(overrides: Partial<{
+      id: string
+      role: string
+      content: string
+      parentId: string | null
+      modifiedFrom: string | null
+      stale: boolean
+      kind: string
+      sourceNodeId: string | null
+    }> = {}): any {
+      return {
+        id: 'node',
+        kind: 'node',
+        role: 'user',
+        content: '',
+        parentId: null,
+        modifiedFrom: null,
+        stale: false,
+        archived: false,
+        pinned: false,
+        status: 'completed',
+        timestamp: 1000,
+        callInfo: null,
+        errorMessage: null,
+        sourceNodeId: null,
+        ...overrides
+      }
+    }
+
+    it('marks current branch path as current', () => {
+      const nodeA = makeNode({ id: 'A', role: 'user', content: 'msg A', parentId: null })
+      const nodeB = makeNode({ id: 'B', role: 'assistant', content: 'msg B', parentId: 'A' })
+      const nodeC = makeNode({ id: 'C', role: 'user', content: 'msg C', parentId: 'B' })
+
+      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB, C: nodeC }
+
+      const result = buildTreeView({
+        messageNodes,
+        visibleMessages: [nodeA, nodeB, nodeC],
+        activeBranchHeadId: 'C'
+      })
+
+      expect(result.map((n) => ({ id: n.id, state: n.state }))).toEqual([
+        { id: 'A', state: 'current' },
+        { id: 'B', state: 'current' },
+        { id: 'C', state: 'current' }
+      ])
+    })
+
+    it('includes sibling nodes at fork points', () => {
+      const nodeA = makeNode({ id: 'A', role: 'user', content: 'msg A', parentId: null })
+      const nodeB = makeNode({ id: 'B', role: 'assistant', content: 'msg B', parentId: 'A' })
+      const nodeBprime = makeNode({
+        id: 'Bprime',
+        role: 'assistant',
+        content: 'msg B prime',
+        parentId: 'A',
+        modifiedFrom: 'B'
+      })
+
+      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB, Bprime: nodeBprime }
+
+      const result = buildTreeView({
+        messageNodes,
+        visibleMessages: [nodeA, nodeB],
+        activeBranchHeadId: 'B'
+      })
+
+      const ids = result.map((n) => n.id)
+      expect(ids).toContain('B')
+      expect(ids).toContain('Bprime')
+
+      const bNode = result.find((n) => n.id === 'B')
+      const bPrimeNode = result.find((n) => n.id === 'Bprime')
+      expect(bNode?.state).toBe('current')
+      expect(bPrimeNode?.state).toBe('sibling')
+    })
+
+    it('marks stale nodes as stale', () => {
+      const nodeA = makeNode({ id: 'A', role: 'user', content: 'msg A', parentId: null })
+      const nodeB = makeNode({ id: 'B', role: 'assistant', content: 'msg B', parentId: 'A', stale: true })
+
+      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB }
+
+      const result = buildTreeView({
+        messageNodes,
+        visibleMessages: [nodeA],
+        activeBranchHeadId: 'A'
+      })
+
+      // A is on current path, B is a sibling (stale) at the fork after A
+      const bNode = result.find((n) => n.id === 'B')
+      expect(bNode?.state).toBe('stale')
+    })
+
+    it('inserts summary nodes inline', () => {
+      const nodeA = makeNode({ id: 'A', role: 'user', content: 'msg A', parentId: null })
+      const nodeB = makeNode({ id: 'B', role: 'assistant', content: 'msg B', parentId: 'A' })
+      const summaryNode = makeNode({
+        id: 'sum-1',
+        kind: 'summary',
+        role: 'summary',
+        content: 'Summary of earlier messages',
+        parentId: null,
+        sourceNodeId: null
+      })
+      // visibleMessages: summary then B (B's sourceNodeId = 'B' references the real node)
+      const visibleB = { ...nodeB, id: 'B', sourceNodeId: 'B' }
+
+      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB }
+
+      const result = buildTreeView({
+        messageNodes,
+        visibleMessages: [summaryNode, visibleB],
+        activeBranchHeadId: 'B'
+      })
+
+      const kinds = result.map((n) => n.kind)
+      expect(kinds).toContain('summary')
+
+      const summaryEntry = result.find((n) => n.kind === 'summary')
+      expect(summaryEntry?.id).toBe('sum-1')
     })
   })
 

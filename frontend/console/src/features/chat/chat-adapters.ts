@@ -6,7 +6,9 @@ import {
   type ChatSession,
   type ChatStreamEvent,
   defaultChatConfig,
-  type PromptTemplate
+  type PromptTemplate,
+  type TreeNode,
+  type TreeNodeState
 } from '@/features/chat/chat-types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -504,4 +506,109 @@ export function normalizeChatSession(payload: unknown): ChatSession {
 export function normalizeChatSessions(payload: unknown): ChatSession[] {
   const source = Array.isArray(payload) ? payload : []
   return source.map(normalizeChatSession)
+}
+
+type BuildTreeViewInput = {
+  messageNodes: ChatMessage[] | Record<string, ChatMessage>
+  visibleMessages: ChatMessage[]
+  activeBranchHeadId: string | null
+}
+
+function truncatePreview(text: string, max: number): string {
+  if (!text) return ''
+  if (text.length <= max) return text
+  return text.slice(0, max).trimEnd() + '…'
+}
+
+export function buildTreeView(input: BuildTreeViewInput): TreeNode[] {
+  const { messageNodes, visibleMessages, activeBranchHeadId } = input
+  const messageNodesArray = Array.isArray(messageNodes)
+    ? messageNodes
+    : Object.values(messageNodes)
+  const byId = new Map(messageNodesArray.map((node) => [node.id, node]))
+
+  // 1. Walk current branch path from head to root, collecting all node ids
+  const currentPath = new Set<string>()
+  let cursor: string | null = activeBranchHeadId
+  while (cursor) {
+    const node = byId.get(cursor)
+    if (!node) break
+    currentPath.add(node.id)
+    cursor = node.parentId ?? null
+  }
+
+  // 2. Build map: parentId -> children[]
+  const childrenByParent = new Map<string | null, ChatMessage[]>()
+  for (const node of messageNodesArray) {
+    const parent = node.parentId ?? null
+    const list = childrenByParent.get(parent) ?? []
+    list.push(node)
+    childrenByParent.set(parent, list)
+  }
+
+  // 3. Classify each node's state; stale wins over current-path
+  function classify(node: ChatMessage): TreeNodeState {
+    if (node.stale) return 'stale'
+    if (currentPath.has(node.id)) return 'current'
+    return 'sibling'
+  }
+
+  // 4. Walk depth-first along current path; at each fork include direct siblings too.
+  // Also include stale children of any current-path node (even if the path doesn't
+  // continue through them) so they remain visible in the tree.
+  const result: TreeNode[] = []
+  function visit(parentId: string | null, depth: number) {
+    const children = childrenByParent.get(parentId) ?? []
+    const hasCurrentChild = children.some((c) => currentPath.has(c.id))
+    for (const child of children) {
+      const onCurrentPath = currentPath.has(child.id)
+      // Include if: on the current path, a sibling at a fork, or a stale leaf
+      // hanging off a current-path node (parentId is on currentPath)
+      const parentOnCurrentPath = parentId !== null && currentPath.has(parentId)
+      if (!onCurrentPath && !hasCurrentChild && !(child.stale && parentOnCurrentPath)) continue
+      result.push({
+        id: child.id,
+        kind: 'node',
+        role: child.role,
+        parentId: child.parentId,
+        state: classify(child),
+        preview: truncatePreview(child.content, 40),
+        depth
+      })
+      if (onCurrentPath) visit(child.id, depth + 1)
+    }
+  }
+  visit(null, 0)
+
+  // 5. Insert summary virtual nodes from visibleMessages
+  for (let i = 0; i < visibleMessages.length; i++) {
+    const visible = visibleMessages[i]
+    if (visible.kind !== 'summary') continue
+
+    // Find the sourceNodeId of the next non-summary visible message as the anchor
+    let anchorNodeId: string | null = null
+    for (let j = i + 1; j < visibleMessages.length; j++) {
+      if (visibleMessages[j].kind !== 'summary') {
+        anchorNodeId = visibleMessages[j].sourceNodeId ?? null
+        break
+      }
+    }
+
+    const anchorIndex = anchorNodeId
+      ? result.findIndex((entry) => entry.id === anchorNodeId)
+      : -1
+    const insertAt = anchorIndex >= 0 ? anchorIndex : result.length
+
+    result.splice(insertAt, 0, {
+      id: visible.id,
+      kind: 'summary',
+      role: visible.role,
+      parentId: null,
+      state: 'current',
+      preview: truncatePreview(visible.content ?? '', 40),
+      depth: 0
+    })
+  }
+
+  return result
 }
