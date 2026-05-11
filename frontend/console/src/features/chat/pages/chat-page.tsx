@@ -42,6 +42,7 @@ export function ChatPage() {
     useChatUiStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null)
+  const [staleBanner, setStaleBanner] = useState<{ targetId: string } | null>(null)
   const saveDraftConfigRef = useRef(session.saveDraftConfig)
   const lastSyncedSessionIdRef = useRef<string | null>(null)
 
@@ -171,6 +172,10 @@ export function ChatPage() {
 
   function handleNodeClick(node: TreeNode) {
     if (node.kind === 'summary') return
+    if (node.state === 'stale') {
+      setStaleBanner({ targetId: node.id })
+      setTimeout(() => setStaleBanner(null), 4000)
+    }
     const element = document.querySelector(`[data-message-id="${node.id}"]`)
     if (element instanceof HTMLElement) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -385,6 +390,28 @@ export function ChatPage() {
         {!config.model && !modelsQuery.isLoading ? (
           <div className="border-b border-border bg-warning/10 px-4 py-3 text-sm text-warning sm:px-6">
             当前没有可用逻辑模型。请先到 Endpoint 页面创建并启用至少一个 Endpoint。
+          </div>
+        ) : null}
+
+        {staleBanner ? (
+          <div className="bg-terracotta/10 border-b border-terracotta/30 px-9 py-2 text-xs text-terracotta flex items-center justify-between">
+            <span>此节点已失效。当前 branch head 在另一处。</span>
+            <button
+              type="button"
+              onClick={() => {
+                setStaleBanner(null)
+                const headId = session.activeSession?.activeBranch?.headMessageId
+                if (headId) {
+                  const element = document.querySelector(`[data-message-id="${headId}"]`)
+                  if (element instanceof HTMLElement) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                  }
+                }
+              }}
+              className="underline hover:opacity-80"
+            >
+              跳转
+            </button>
           </div>
         ) : null}
 
