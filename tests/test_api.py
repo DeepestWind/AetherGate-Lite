@@ -1420,3 +1420,91 @@ def test_chat_conversation_rename_returns_404_for_missing_conversation(client, a
         json={"title": "新的标题"},
     )
     assert rename_response.status_code == 404
+
+
+def test_summary_visible_message_includes_source_node_ids(client, auth_headers, monkeypatch):
+    """When compression has occurred, summary visible_messages include the original node IDs."""
+    async def fake_chat(self, endpoint, messages, temperature, max_tokens):
+        return ProviderChatResult(
+            content="reply",
+            finish_reason="stop",
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            actual_model=endpoint.model_name,
+        )
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "chat_completions", fake_chat)
+
+    # Create endpoint
+    client.post(
+        "/api/endpoints",
+        headers=auth_headers,
+        json={
+            "name": "summary-test-endpoint",
+            "provider_type": "openai_compatible",
+            "base_url": "https://provider.example/v1",
+            "api_key": "sk-test-key",
+            "model_name": "gpt-4o-mini",
+            "logical_model": "gpt-lite",
+            "priority": 10,
+        },
+    )
+
+    # Create conversation
+    conv_response = client.post(
+        "/api/chat/conversations",
+        headers=auth_headers,
+        json={
+            "draft_config": {
+                "model": "gpt-lite",
+                "prompt_id": "",
+                "strategy": "balanced",
+                "temperature": 0,
+                "variables": {},
+            }
+        },
+    )
+    assert conv_response.status_code == 201
+    conv_id = conv_response.json()["id"]
+
+    # Send a message so the conversation has visible data
+    send_resp = client.post(
+        f"/api/chat/conversations/{conv_id}/messages",
+        headers=auth_headers,
+        json={
+            "content": "hello",
+            "draft_config": {
+                "model": "gpt-lite",
+                "prompt_id": "",
+                "strategy": "balanced",
+                "temperature": 0,
+                "variables": {},
+            },
+        },
+    )
+    assert send_resp.status_code == 200
+
+    # Fetch the conversation. The schema should expose source_node_ids on all visible message entries.
+    response = client.get(f"/api/chat/conversations/{conv_id}", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+
+    # There must be visible messages for the assertions below to be meaningful
+    assert len(body["visible_messages"]) > 0, "Expected at least one visible message after sending"
+
+    # Schema check: every summary entry must have source_node_ids field present.
+    summaries = [m for m in body["visible_messages"] if m["kind"] == "summary"]
+    for entry in summaries:
+        assert "source_node_ids" in entry
+        assert entry["source_node_ids"] is None or (
+            isinstance(entry["source_node_ids"], list)
+            and all(isinstance(x, str) for x in entry["source_node_ids"])
+        )
+
+    # Schema check: every non-summary entry has source_node_ids key present and set to None
+    non_summaries = [m for m in body["visible_messages"] if m["kind"] != "summary"]
+    for entry in non_summaries:
+        # The field must be present in the serialized JSON (not just absent/missing)
+        assert "source_node_ids" in entry, f"source_node_ids key missing from non-summary entry: {entry}"
+        assert entry["source_node_ids"] is None

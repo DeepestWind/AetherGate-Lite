@@ -104,6 +104,7 @@ class VisibleMessageResponse(BaseModel):
     role: ChatMessageRole
     content: str
     source_node_id: str | None = None
+    source_node_ids: list[str] | None = None  # populated when kind="summary"
     timestamp: int | None = None
 
 

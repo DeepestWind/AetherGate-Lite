@@ -1162,6 +1162,14 @@ class ChatSessionService:
 
         visible_messages: list[VisibleMessageResponse] = []
         summary_index = 0
+        source_node_ids_for_summary: list[str] = []
+        if branch.compressed_source_versions_json:
+            try:
+                parsed = json.loads(branch.compressed_source_versions_json)
+                if isinstance(parsed, dict):
+                    source_node_ids_for_summary = [str(k) for k in parsed.keys()]
+            except (TypeError, ValueError):
+                source_node_ids_for_summary = []
         for entry in cached_path:
             node_id = str(entry.get("node_id", ""))
             role = str(entry.get("role", "assistant"))
@@ -1176,6 +1184,7 @@ class ChatSessionService:
                         role="summary",
                         content=content,
                         source_node_id=None,
+                        source_node_ids=source_node_ids_for_summary if source_node_ids_for_summary else None,
                         timestamp=timestamp,
                     )
                 )
