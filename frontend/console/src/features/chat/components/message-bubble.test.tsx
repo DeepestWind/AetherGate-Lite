@@ -93,7 +93,7 @@ describe('MessageBubble', () => {
     await user.click(screen.getByRole('button', { name: '重新生成回复' }))
     expect(onRegenerateMessage).toHaveBeenCalledWith(message)
 
-    await user.click(screen.getByRole('button', { name: '创建分支' }))
+    await user.click(screen.getByRole('button', { name: '从这里分叉' }))
     expect(onBranchMessage).toHaveBeenCalledWith(message)
 
     await user.click(screen.getByRole('button', { name: '编辑消息' }))
@@ -125,6 +125,6 @@ describe('MessageBubble', () => {
       />
     )
 
-    expect(screen.queryByRole('button', { name: '创建分支' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '从这里分叉' })).not.toBeInTheDocument()
   })
 })
