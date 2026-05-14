@@ -14,6 +14,42 @@
 
 ---
 
+## Python 环境
+
+Branchat 使用 `uv` 全量管理 Python 版本、虚拟环境和依赖锁文件：
+
+- `.python-version` 固定项目 Python 版本为 `3.12`
+- `uv.lock` 锁定后端运行依赖和开发依赖
+- `.venv/` 由 `uv sync` 或 `uv run` 自动创建，仍然不纳入版本控制
+
+缺少 `uv` 时，后端启动脚本会直接失败。安装方式见 [uv 官方文档](https://docs.astral.sh/uv/)。
+
+常用命令：
+
+```bash
+# 同步本地开发环境（包含 pytest 等 dev 依赖）
+uv sync --locked
+
+# 只同步运行后端所需依赖
+uv sync --locked --no-dev
+
+# 检查锁文件是否与 pyproject.toml 一致
+uv lock --check
+
+# 运行后端测试
+uv run --locked pytest
+```
+
+维护依赖时使用：
+
+```bash
+uv add <package>
+uv add --dev <package>
+uv lock --check
+```
+
+---
+
 ## 常用环境变量
 
 | 环境变量 | 说明 | 默认值 |
@@ -61,6 +97,8 @@
 ```bash
 ./scripts/start_core.sh
 ```
+
+该脚本通过 `uv run --locked --no-dev -m uvicorn ...` 启动 FastAPI，不再回退到 `python3 -m venv` 或 `pip install`。
 
 ### 只启动控制台开发服务器
 

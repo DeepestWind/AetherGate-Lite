@@ -76,12 +76,13 @@ Branchat:        A → B → C → D → E       ← main
 
 ## 快速开始
 
-运行要求：Python `>= 3.12` + 可用的 `npm`，推荐安装 `uv`（脚本会自动降级到 `venv + pip`）。
+运行要求：可用的 `uv` + `npm`。Python 版本由仓库根目录的 `.python-version` 固定为 `3.12`，依赖由 `uv.lock` 锁定。
 
 ### 1. 初始化配置
 
 ```bash
 cp config.example.toml config.toml
+uv sync --locked
 ```
 
 最少确认这三项：
@@ -100,6 +101,12 @@ cp config.example.toml config.toml
 
 - 后端 API：`http://127.0.0.1:8000`
 - 前端控制台：`http://127.0.0.1:3001`
+
+后端启动脚本要求本机已安装 `uv`；缺少 `uv` 会直接失败。后端测试使用：
+
+```bash
+uv run --locked pytest
+```
 
 更细的启动选项、环境变量、安全注意事项与生产部署，见 [docs/operations.md](./docs/operations.md)。
 

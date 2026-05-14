@@ -14,30 +14,9 @@ if [[ ! -f config.toml ]]; then
   echo "Created config.toml from config.example.toml"
 fi
 
-ensure_uv_environment() {
-  if [[ ! -x .venv/bin/python ]]; then
-    uv venv
-  fi
-
-  if ! .venv/bin/python -c "import fastapi, sqlalchemy, httpx, uvicorn, cryptography" >/dev/null 2>&1; then
-    uv pip install -e .
-  fi
-}
-
-ensure_venv_environment() {
-  if [[ ! -x .venv/bin/python ]]; then
-    python3 -m venv .venv
-  fi
-
-  if ! .venv/bin/python -c "import fastapi, sqlalchemy, httpx, uvicorn, cryptography" >/dev/null 2>&1; then
-    .venv/bin/pip install -e .
-  fi
-}
-
-if command -v uv >/dev/null 2>&1; then
-  ensure_uv_environment
-else
-  ensure_venv_environment
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required. Install it from https://docs.astral.sh/uv/"
+  exit 1
 fi
 
 UVICORN_ARGS=(
@@ -56,4 +35,4 @@ if [[ -f frontend/console/dist/index.html ]]; then
 else
   echo "Built console is not available. Run ./scripts/build_console.sh or use ./scripts/start.sh for dev mode."
 fi
-exec .venv/bin/python -m uvicorn "${UVICORN_ARGS[@]}"
+exec uv run --locked --no-dev -m uvicorn "${UVICORN_ARGS[@]}"
