@@ -52,7 +52,6 @@ describe('SessionSidebar', () => {
       <SessionSidebar
         activeSessionId="today"
         onCreate={() => {}}
-        onCollapse={() => {}}
         onDelete={() => {}}
         onRename={async () => {}}
         onSelect={() => {}}
@@ -99,7 +98,6 @@ describe('SessionSidebar', () => {
       <SessionSidebar
         activeSessionId="today"
         onCreate={() => {}}
-        onCollapse={() => {}}
         onDelete={() => {}}
         onRename={onRename}
         onSelect={() => {}}
