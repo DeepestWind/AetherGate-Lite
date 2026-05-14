@@ -43,7 +43,7 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 if [[ ! -d node_modules ]]; then
-  npm install
+  npm ci
 fi
 
 echo "Starting console dev server on http://127.0.0.1:${DEV_PORT}"

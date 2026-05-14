@@ -13,7 +13,7 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 if [[ ! -d node_modules ]]; then
-  npm install
+  npm ci
 fi
 
 echo "Building Branchat console..."

@@ -76,7 +76,7 @@ Branchat:        A → B → C → D → E       ← main
 
 ## 快速开始
 
-运行要求：可用的 `uv` + `npm`。Python 版本由仓库根目录的 `.python-version` 固定为 `3.12`，依赖由 `uv.lock` 锁定。
+运行要求：可用的 `uv`、Node.js `^20.19.0 || >=22.12.0` 和 `npm`。Python 版本由仓库根目录的 `.python-version` 固定为 `3.12`，依赖由 `uv.lock` 锁定；前端依赖由 `frontend/console/package-lock.json` 锁定。
 
 ### 1. 初始化配置
 
@@ -106,6 +106,14 @@ uv sync --locked
 
 ```bash
 uv run --locked pytest
+```
+
+前端脚本要求使用 npm。首次启动或构建时，如果 `frontend/console/node_modules` 不存在，脚本会执行 `npm ci` 按锁文件安装依赖。前端测试和构建使用：
+
+```bash
+cd frontend/console
+npm test
+npm run build
 ```
 
 更细的启动选项、环境变量、安全注意事项与生产部署，见 [docs/operations.md](./docs/operations.md)。

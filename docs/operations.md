@@ -50,6 +50,37 @@ uv lock --check
 
 ---
 
+## 前端环境
+
+控制台使用 `npm` 作为唯一前端包管理器：
+
+- Node.js 版本要求：`^20.19.0 || >=22.12.0`
+- npm 版本元信息：`frontend/console/package.json` 的 `packageManager`
+- 依赖锁文件：`frontend/console/package-lock.json`
+- 不再维护 `pnpm-lock.yaml`
+
+常用命令：
+
+```bash
+cd frontend/console
+
+# 按锁文件安装依赖，适合干净环境和 CI
+npm ci
+
+# 运行前端测试
+npm test
+
+# 类型检查并构建生产包
+npm run build
+
+# 检查代码风格
+npm run check
+```
+
+维护依赖时使用 `npm install <package>` 或 `npm install -D <package>`，并提交同步后的 `package.json` 与 `package-lock.json`。
+
+---
+
 ## 常用环境变量
 
 | 环境变量 | 说明 | 默认值 |
@@ -107,6 +138,7 @@ uv lock --check
 ```
 
 如果 `config.toml` 里设置了 `auth_token`，启动脚本会自动读取并注入控制台默认 Token。
+如果 `frontend/console/node_modules` 不存在，该脚本会先执行 `npm ci`。
 
 ### 构建控制台并由 FastAPI 托管
 
@@ -116,6 +148,7 @@ uv lock --check
 ```
 
 构建完成后访问 `http://127.0.0.1:8000/` 即可打开内嵌控制台。
+如果 `frontend/console/node_modules` 不存在，构建脚本会先执行 `npm ci`。
 
 ---
 
