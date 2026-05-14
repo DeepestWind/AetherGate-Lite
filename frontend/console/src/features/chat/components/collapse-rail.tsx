@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { cn } from '@/shared/lib/cn'
 
 type CollapseRailProps = {

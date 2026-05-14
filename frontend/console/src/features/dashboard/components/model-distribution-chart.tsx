@@ -14,17 +14,24 @@ type ModelDistributionChartProps = {
 }
 
 const NOTEBOOK_PALETTE = {
-  primary: '#94785a',   // sand
+  primary: '#94785a', // sand
   secondary: '#7d9477', // moss
-  tertiary: '#6b5d44',  // ink-soft
-  grid: '#e8dfce',      // rule
-  text: '#6b5d44'       // ink-soft
+  tertiary: '#6b5d44', // ink-soft
+  grid: '#e8dfce', // rule
+  text: '#6b5d44' // ink-soft
 }
 
 function buildOption(data: Array<{ name: string; value: number }>): EChartsOption {
   return {
     backgroundColor: 'transparent',
-    color: [NOTEBOOK_PALETTE.primary, NOTEBOOK_PALETTE.secondary, NOTEBOOK_PALETTE.tertiary, '#b5956a', '#a3b89c', '#8f7d5e'],
+    color: [
+      NOTEBOOK_PALETTE.primary,
+      NOTEBOOK_PALETTE.secondary,
+      NOTEBOOK_PALETTE.tertiary,
+      '#b5956a',
+      '#a3b89c',
+      '#8f7d5e'
+    ],
     tooltip: {
       trigger: 'item',
       formatter: '{b}: {c} 次 ({d}%)'

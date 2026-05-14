@@ -1,6 +1,6 @@
-import { render } from '@/testing/render'
-import { PromptPreviewDialog } from '@/features/prompts/components/prompt-preview-dialog'
 import { vi } from 'vitest'
+import { PromptPreviewDialog } from '@/features/prompts/components/prompt-preview-dialog'
+import { render } from '@/testing/render'
 
 vi.mock('@/features/prompts/mutations/use-preview-prompt-mutation', () => ({
   usePreviewPromptMutation: () => ({

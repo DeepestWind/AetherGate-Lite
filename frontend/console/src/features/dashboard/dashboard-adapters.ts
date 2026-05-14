@@ -57,14 +57,18 @@ export function normalizeDashboardMetrics(payload: unknown): DashboardMetrics {
   const rawModels = readValue(source, ['modelDistribution', 'model_distribution', 'models'], {})
   const models = isRecord(rawModels) ? rawModels : {}
 
-  const calls = toNumber(readValue(source, ['calls', 'totalCalls', 'totalRequests', 'total_requests'], 0))
+  const calls = toNumber(
+    readValue(source, ['calls', 'totalCalls', 'totalRequests', 'total_requests'], 0)
+  )
   const costUsd = toNumber(readValue(source, ['costUsd', 'cost_usd'], 0))
   const tokens = toNumber(readValue(source, ['tokens', 'totalTokens', 'total_tokens'], 0))
   const cacheHits = toNumber(readValue(source, ['cacheHits', 'cache_hits'], 0))
   const cacheHitRate = toNumber(
     readValue(source, ['cacheHitRate', 'cache_hit_rate'], calls > 0 ? cacheHits / calls : 0)
   )
-  const avgLatencyMs = toNumber(readValue(source, ['avgLatencyMs', 'averageLatencyMs', 'average_latency_ms'], 0))
+  const avgLatencyMs = toNumber(
+    readValue(source, ['avgLatencyMs', 'averageLatencyMs', 'average_latency_ms'], 0)
+  )
 
   const modelDistribution = Object.entries(models)
     .map(([name, value]) => ({
@@ -94,7 +98,7 @@ export function normalizeDashboardStats(payload: unknown): DashboardStatPoint[] 
       ? payload.series
       : isRecord(payload) && Array.isArray(payload.content)
         ? payload.content
-      : []
+        : []
 
   return source.map((item) => {
     const row = isRecord(item) ? item : {}
@@ -105,7 +109,11 @@ export function normalizeDashboardStats(payload: unknown): DashboardStatPoint[] 
       statDate,
       dateLabel: parsedDate.isValid() ? parsedDate.format('MM/DD') : '--/--',
       totalCalls: toNumber(
-        readValue(row, ['totalCalls', 'total_calls', 'calls', 'requestCount', 'totalRequests', 'total_requests'], 0)
+        readValue(
+          row,
+          ['totalCalls', 'total_calls', 'calls', 'requestCount', 'totalRequests', 'total_requests'],
+          0
+        )
       ),
       totalCostUsd: toNumber(
         readValue(row, ['totalCostUsd', 'total_cost_usd', 'costUsd', 'cost_usd'], 0)
@@ -140,7 +148,9 @@ export function normalizeDashboardLogsPage(payload: unknown): DashboardLogsPage 
       ? source.content
       : []
   const content = items.map((item, index) => normalizeDashboardLogRow(item, index))
-  const totalElements = toNumber(readValue(source, ['totalElements', 'total_elements', 'total'], content.length))
+  const totalElements = toNumber(
+    readValue(source, ['totalElements', 'total_elements', 'total'], content.length)
+  )
   const size = toNumber(readValue(source, ['size'], content.length || 10), content.length || 10)
   const page = toNumber(readValue(source, ['page'], 0))
   const totalPages = size > 0 ? Math.max(1, Math.ceil(totalElements / size)) : 1

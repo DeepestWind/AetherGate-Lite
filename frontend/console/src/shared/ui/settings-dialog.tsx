@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useSessionStore } from '@/shared/stores/use-session-store'
+import { Button } from '@/shared/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -7,9 +9,7 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/shared/ui/dialog'
-import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
-import { useSessionStore } from '@/shared/stores/use-session-store'
 
 type SettingsDialogProps = {
   onOpenChange: (open: boolean) => void

@@ -5,6 +5,7 @@ import {
   normalizeChatSession,
   normalizePromptTemplates
 } from '@/features/chat/chat-adapters'
+import type { ChatMessage } from '@/features/chat/chat-types'
 
 describe('chat adapters', () => {
   it('normalizes available model list payload', () => {
@@ -104,9 +105,30 @@ describe('chat adapters', () => {
           }
         ],
         message_nodes: {
-          msg_1: { id: 'msg_1', role: 'user', content: 'q1', status: 'completed', timestamp: 1000, parent_id: null },
-          msg_2: { id: 'msg_2', role: 'assistant', content: 'a1', status: 'completed', timestamp: 2000, parent_id: 'msg_1' },
-          msg_3: { id: 'msg_3', role: 'user', content: 'q2', status: 'completed', timestamp: 3000, parent_id: 'msg_2' }
+          msg_1: {
+            id: 'msg_1',
+            role: 'user',
+            content: 'q1',
+            status: 'completed',
+            timestamp: 1000,
+            parent_id: null
+          },
+          msg_2: {
+            id: 'msg_2',
+            role: 'assistant',
+            content: 'a1',
+            status: 'completed',
+            timestamp: 2000,
+            parent_id: 'msg_1'
+          },
+          msg_3: {
+            id: 'msg_3',
+            role: 'user',
+            content: 'q2',
+            status: 'completed',
+            timestamp: 3000,
+            parent_id: 'msg_2'
+          }
         },
         visible_messages: [
           {
@@ -156,8 +178,22 @@ describe('chat adapters', () => {
           }
         ],
         message_nodes: {
-          msg_1: { id: 'msg_1', role: 'user', content: 'q1', status: 'completed', timestamp: 1000, parent_id: null },
-          msg_2: { id: 'msg_2', role: 'assistant', content: 'a1', status: 'completed', timestamp: 2000, parent_id: 'msg_1' }
+          msg_1: {
+            id: 'msg_1',
+            role: 'user',
+            content: 'q1',
+            status: 'completed',
+            timestamp: 1000,
+            parent_id: null
+          },
+          msg_2: {
+            id: 'msg_2',
+            role: 'assistant',
+            content: 'a1',
+            status: 'completed',
+            timestamp: 2000,
+            parent_id: 'msg_1'
+          }
         },
         visible_messages: [
           {
@@ -206,7 +242,14 @@ describe('chat adapters', () => {
           }
         ],
         message_nodes: {
-          msg_1: { id: 'msg_1', role: 'user', content: 'q1', status: 'completed', timestamp: 1000, parent_id: null }
+          msg_1: {
+            id: 'msg_1',
+            role: 'user',
+            content: 'q1',
+            status: 'completed',
+            timestamp: 1000,
+            parent_id: null
+          }
         },
         visible_messages: [
           {
@@ -228,16 +271,7 @@ describe('chat adapters', () => {
   })
 
   describe('buildTreeView', () => {
-    function makeNode(overrides: Partial<{
-      id: string
-      role: string
-      content: string
-      parentId: string | null
-      modifiedFrom: string | null
-      stale: boolean
-      kind: string
-      sourceNodeId: string | null
-    }> = {}): any {
+    function makeNode(overrides: Partial<ChatMessage> = {}): ChatMessage {
       return {
         id: 'node',
         kind: 'node',
@@ -262,7 +296,7 @@ describe('chat adapters', () => {
       const nodeB = makeNode({ id: 'B', role: 'assistant', content: 'msg B', parentId: 'A' })
       const nodeC = makeNode({ id: 'C', role: 'user', content: 'msg C', parentId: 'B' })
 
-      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB, C: nodeC }
+      const messageNodes: Record<string, ChatMessage> = { A: nodeA, B: nodeB, C: nodeC }
 
       const result = buildTreeView({
         messageNodes,
@@ -288,7 +322,7 @@ describe('chat adapters', () => {
         modifiedFrom: 'B'
       })
 
-      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB, Bprime: nodeBprime }
+      const messageNodes: Record<string, ChatMessage> = { A: nodeA, B: nodeB, Bprime: nodeBprime }
 
       const result = buildTreeView({
         messageNodes,
@@ -308,9 +342,15 @@ describe('chat adapters', () => {
 
     it('marks stale nodes as stale', () => {
       const nodeA = makeNode({ id: 'A', role: 'user', content: 'msg A', parentId: null })
-      const nodeB = makeNode({ id: 'B', role: 'assistant', content: 'msg B', parentId: 'A', stale: true })
+      const nodeB = makeNode({
+        id: 'B',
+        role: 'assistant',
+        content: 'msg B',
+        parentId: 'A',
+        stale: true
+      })
 
-      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB }
+      const messageNodes: Record<string, ChatMessage> = { A: nodeA, B: nodeB }
 
       const result = buildTreeView({
         messageNodes,
@@ -337,7 +377,7 @@ describe('chat adapters', () => {
       // visibleMessages: summary then B (B's sourceNodeId = 'B' references the real node)
       const visibleB = { ...nodeB, id: 'B', sourceNodeId: 'B' }
 
-      const messageNodes: Record<string, any> = { A: nodeA, B: nodeB }
+      const messageNodes: Record<string, ChatMessage> = { A: nodeA, B: nodeB }
 
       const result = buildTreeView({
         messageNodes,

@@ -8,7 +8,11 @@ type BranchPillProps = {
   children?: ReactNode
 }
 
-export function BranchPill({ variant = 'primary', onClick, children = '从这里分叉' }: BranchPillProps) {
+export function BranchPill({
+  variant = 'primary',
+  onClick,
+  children = '从这里分叉'
+}: BranchPillProps) {
   return (
     <button
       type="button"

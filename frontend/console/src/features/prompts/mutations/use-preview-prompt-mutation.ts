@@ -13,4 +13,3 @@ export function usePreviewPromptMutation() {
       normalizePromptPreview(await previewPromptTemplate(id, { variables }))
   })
 }
-

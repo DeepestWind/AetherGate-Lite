@@ -79,7 +79,6 @@ export function MessageList({
   onTogglePinMessage
 }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
-  const messageCount = messages.length
   const siblingMeta = useMemo(() => buildAssistantSiblingMeta(messageNodes), [messageNodes])
   const stickToBottomRef = useRef(true)
   const lastMessageSignature = useMemo(() => {
@@ -96,7 +95,7 @@ export function MessageList({
       return
     }
 
-    if (messageCount === 0) {
+    if (lastMessageSignature === 'empty') {
       listRef.current.scrollTop = 0
       return
     }
@@ -106,7 +105,7 @@ export function MessageList({
     }
 
     listRef.current.scrollTop = listRef.current.scrollHeight
-  }, [lastMessageSignature, messageCount])
+  }, [lastMessageSignature])
 
   return (
     <div

@@ -1,11 +1,11 @@
-import { useState } from 'react'
 import { ChevronDown, ChevronUp, Package } from 'lucide-react'
+import { useState } from 'react'
 import type { ChatMessage } from '@/features/chat/chat-types'
 import { cn } from '@/shared/lib/cn'
 
 type SummaryNodeProps = {
-  message: ChatMessage  // kind === 'summary'
-  archivedMessages: ChatMessage[]  // resolved from archivedNodeIds against messageNodes
+  message: ChatMessage // kind === 'summary'
+  archivedMessages: ChatMessage[] // resolved from archivedNodeIds against messageNodes
 }
 
 export function SummaryNode({ message, archivedMessages }: SummaryNodeProps) {
@@ -31,7 +31,15 @@ export function SummaryNode({ message, archivedMessages }: SummaryNodeProps) {
             onClick={() => setExpanded((value) => !value)}
             className="text-[11px] text-moss hover:opacity-80 inline-flex items-center gap-1"
           >
-            {expanded ? <>收起 <ChevronUp className="size-3" /></> : <>展开原始内容 <ChevronDown className="size-3" /></>}
+            {expanded ? (
+              <>
+                收起 <ChevronUp className="size-3" />
+              </>
+            ) : (
+              <>
+                展开原始内容 <ChevronDown className="size-3" />
+              </>
+            )}
           </button>
         ) : null}
       </div>

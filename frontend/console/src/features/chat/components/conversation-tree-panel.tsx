@@ -8,7 +8,12 @@ type ConversationTreePanelProps = {
   onNodeHover: (node: TreeNode | null) => void
 }
 
-export function ConversationTreePanel({ tree, focusedId, onNodeClick, onNodeHover }: ConversationTreePanelProps) {
+export function ConversationTreePanel({
+  tree,
+  focusedId,
+  onNodeClick,
+  onNodeHover
+}: ConversationTreePanelProps) {
   if (tree.length === 0) {
     return <div className="px-4 py-3 text-xs text-ink-faint italic font-serif">no nodes yet</div>
   }

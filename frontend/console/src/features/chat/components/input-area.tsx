@@ -15,7 +15,14 @@ type InputAreaProps = {
 const MAX_MESSAGE_LENGTH = 32_768
 const WARNING_THRESHOLD = 28_000
 
-export function InputArea({ onChange, onSend, onStop, sendDisabled, sending, value }: InputAreaProps) {
+export function InputArea({
+  onChange,
+  onSend,
+  onStop,
+  sendDisabled,
+  sending,
+  value
+}: InputAreaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [focused, setFocused] = useState(false)
   const charCount = value.length
@@ -92,11 +99,7 @@ export function InputArea({ onChange, onSend, onStop, sendDisabled, sending, val
                 </span>
               ) : null}
 
-              <Button
-                size="sm"
-                onClick={onSend}
-                disabled={sendDisabled}
-              >
+              <Button size="sm" onClick={onSend} disabled={sendDisabled}>
                 ↵ 发送
               </Button>
             </div>

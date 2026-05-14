@@ -23,17 +23,17 @@ export function PromptPreviewDialog({ onOpenChange, open, prompt }: PromptPrevie
   const previewMutation = usePreviewPromptMutation()
   const [variables, setVariables] = useState<Record<string, string>>({})
 
-  const variableKeys = useMemo(() => prompt?.variables ?? [], [prompt?.id, prompt?.variables])
-  const variableKeysSignature = variableKeys.join('\n')
+  const variableKeys = useMemo(() => prompt?.variables ?? [], [prompt?.variables])
+  const promptId = prompt?.id ?? null
 
   useEffect(() => {
-    if (!open || !prompt) {
+    if (!open || !promptId) {
       setVariables((current) => (Object.keys(current).length > 0 ? {} : current))
       previewMutation.reset()
       return
     }
 
-    const nextVariables = Object.fromEntries((prompt.variables ?? []).map((key) => [key, '']))
+    const nextVariables = Object.fromEntries(variableKeys.map((key) => [key, '']))
     setVariables((current) => {
       const currentKeys = Object.keys(current)
       if (
@@ -46,7 +46,7 @@ export function PromptPreviewDialog({ onOpenChange, open, prompt }: PromptPrevie
       return nextVariables
     })
     previewMutation.reset()
-  }, [open, previewMutation.reset, prompt?.id, variableKeysSignature])
+  }, [open, previewMutation.reset, promptId, variableKeys])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

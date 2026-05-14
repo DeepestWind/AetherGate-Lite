@@ -14,4 +14,3 @@ export const promptFormSchema = z.object({
 })
 
 export type PromptFormSchema = typeof promptFormSchema
-

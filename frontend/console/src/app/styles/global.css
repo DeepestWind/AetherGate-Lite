@@ -43,49 +43,49 @@
   --radius-lg: var(--radius);
 
   --shadow-panel: var(--shadow-panel);
-  --shadow-card:  var(--shadow-card);
+  --shadow-card: var(--shadow-card);
 }
 
 :root {
   /* Notebook palette — primary tokens */
-  --paper:        #faf7f2;
-  --paper-shade:  #f3eee2;
-  --paper-warm:   #f8f4ea;
+  --paper: #faf7f2;
+  --paper-shade: #f3eee2;
+  --paper-warm: #f8f4ea;
   --surface-card: #ffffff;
-  --ink:          #2c2519;
-  --ink-soft:     #6b5d44;
-  --ink-faint:    #a89880;
-  --rule:         #e8dfce;
-  --rule-soft:    #efe8d9;
-  --sand:         #94785a;
-  --sand-hover:   #7d6648;
-  --moss:         #7d9477;
-  --terracotta:   #c08768;
+  --ink: #2c2519;
+  --ink-soft: #6b5d44;
+  --ink-faint: #a89880;
+  --rule: #e8dfce;
+  --rule-soft: #efe8d9;
+  --sand: #94785a;
+  --sand-hover: #7d6648;
+  --moss: #7d9477;
+  --terracotta: #c08768;
 
   /* Legacy semantic aliases — point at notebook tokens so existing
      bg-background / text-foreground call sites get new look for free */
-  --background:        var(--paper);
-  --surface:           var(--paper-warm);
-  --elevated:          var(--surface-card);
-  --panel:             var(--paper-warm);
-  --panel-strong:      var(--paper-shade);
-  --secondary:         var(--paper-shade);
-  --foreground:        var(--ink);
-  --foreground-soft:   var(--ink-soft);
-  --muted-foreground:  var(--ink-faint);
-  --border:            var(--rule);
-  --border-strong:     var(--ink-faint);
-  --accent:            var(--sand);
-  --accent-soft:       var(--paper-shade);
-  --accent-strong:     var(--sand-hover);
-  --success:           var(--moss);
-  --warning:           var(--terracotta);
-  --danger:            var(--terracotta);
+  --background: var(--paper);
+  --surface: var(--paper-warm);
+  --elevated: var(--surface-card);
+  --panel: var(--paper-warm);
+  --panel-strong: var(--paper-shade);
+  --secondary: var(--paper-shade);
+  --foreground: var(--ink);
+  --foreground-soft: var(--ink-soft);
+  --muted-foreground: var(--ink-faint);
+  --border: var(--rule);
+  --border-strong: var(--ink-faint);
+  --accent: var(--sand);
+  --accent-soft: var(--paper-shade);
+  --accent-strong: var(--sand-hover);
+  --success: var(--moss);
+  --warning: var(--terracotta);
+  --danger: var(--terracotta);
 
-  --radius:            12px;
+  --radius: 12px;
 
   --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.04);
-  --shadow-card:  var(--shadow-panel);
+  --shadow-card: var(--shadow-panel);
 }
 
 @layer base {
@@ -252,6 +252,10 @@
   animation: chat-msg-flash 220ms ease-out;
 }
 @keyframes chat-msg-flash {
-  0%   { box-shadow: inset 2px 0 0 0 var(--sand); }
-  100% { box-shadow: inset 2px 0 0 0 transparent; }
+  0% {
+    box-shadow: inset 2px 0 0 0 var(--sand);
+  }
+  100% {
+    box-shadow: inset 2px 0 0 0 transparent;
+  }
 }

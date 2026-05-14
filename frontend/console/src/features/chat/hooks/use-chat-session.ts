@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getActiveChatBranch,
   normalizeChatSession,
-  normalizeChatStreamEvent,
   normalizeChatSessions,
+  normalizeChatStreamEvent,
   resolveChatSessionGraph
 } from '@/features/chat/chat-adapters'
 import {
@@ -17,8 +17,8 @@ import {
 } from '@/features/chat/chat-types'
 import {
   activateConversationBranch,
-  createConversationBranch,
   createChatConversation,
+  createConversationBranch,
   deleteChatConversation,
   getChatConversation,
   listChatConversations,
@@ -29,8 +29,8 @@ import {
   streamConversationMessageWithEdits,
   streamEditConversationMessageInBranch,
   streamRegenerateConversationMessage,
-  updateConversationMessagePin,
-  updateChatConversationConfig
+  updateChatConversationConfig,
+  updateConversationMessagePin
 } from '@/shared/api/modules/chat'
 
 type UseChatSessionResult = {
@@ -110,8 +110,7 @@ function mergeSessionState(
   incoming: ChatSession
 ): ChatSession {
   if (
-    currentSession &&
-    currentSession.messagesLoaded &&
+    currentSession?.messagesLoaded &&
     incoming.messagesLoaded &&
     incoming.messageCount < currentSession.messageCount
   ) {
@@ -202,7 +201,11 @@ function applyAssistantVariantPreviews(
     }
 
     const previewMessage = messageNodes[previewMessageId]
-    if (!previewMessage || previewMessage.role !== 'assistant' || previewMessage.parentId !== message.parentId) {
+    if (
+      !previewMessage ||
+      previewMessage.role !== 'assistant' ||
+      previewMessage.parentId !== message.parentId
+    ) {
       return message
     }
 
@@ -233,10 +236,7 @@ function isLeafAssistantGroup(session: ChatSession, messageId: string) {
   return headMessage?.role === 'assistant' && headMessage.parentId === targetMessage.parentId
 }
 
-function findLatestAssistantSibling(
-  messageNodes: Record<string, ChatMessage>,
-  parentId: string
-) {
+function findLatestAssistantSibling(messageNodes: Record<string, ChatMessage>, parentId: string) {
   const siblings = Object.values(messageNodes).filter(
     (message) => message.role === 'assistant' && message.parentId === parentId && !message.archived
   )
@@ -244,18 +244,17 @@ function findLatestAssistantSibling(
     return null
   }
 
-  return [...siblings].sort((left, right) => {
-    if (left.timestamp !== right.timestamp) {
-      return right.timestamp - left.timestamp
-    }
-    return right.id.localeCompare(left.id)
-  })[0] ?? null
+  return (
+    [...siblings].sort((left, right) => {
+      if (left.timestamp !== right.timestamp) {
+        return right.timestamp - left.timestamp
+      }
+      return right.id.localeCompare(left.id)
+    })[0] ?? null
+  )
 }
 
-function hasVisibleChildMessage(
-  messageNodes: Record<string, ChatMessage>,
-  messageId: string
-) {
+function hasVisibleChildMessage(messageNodes: Record<string, ChatMessage>, messageId: string) {
   return Object.values(messageNodes).some(
     (message) => message.parentId === messageId && !message.archived
   )
@@ -450,12 +449,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
             setSessions((current) =>
               current.map((session) =>
                 session.id === sessionId
-                  ? applyStreamCreated(
-                      session,
-                      event,
-                      tempUserMessageId,
-                      tempAssistantMessageId
-                    )
+                  ? applyStreamCreated(session, event, tempUserMessageId, tempAssistantMessageId)
                   : session
               )
             )
@@ -879,6 +873,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
       return
     }
 
+    const parentId = targetMessage.parentId
     const activeBranchId = activeSession.activeBranchId
     const leafAssistantGroup = isLeafAssistantGroup(activeSession, messageId)
     const modifiedNodes = buildModifiedNodesPayload(pendingEdits)
@@ -900,14 +895,14 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     })
     const refreshed = streamedSession ?? (await loadConversationDetail(activeSessionId))
     if (!leafAssistantGroup && activeBranchId) {
-      const newestSibling = findLatestAssistantSibling(refreshed.messageNodes, targetMessage.parentId)
+      const newestSibling = findLatestAssistantSibling(refreshed.messageNodes, parentId)
       if (newestSibling) {
         setAssistantPreviewSelectionsBySession((current) =>
           setBranchAssistantPreviewSelection(
             current,
             activeSessionId,
             activeBranchId,
-            targetMessage.parentId!,
+            parentId,
             newestSibling.id
           )
         )
@@ -936,22 +931,20 @@ export function useChatSession(enabled = true): UseChatSessionResult {
       return
     }
 
+    const parentId = targetMessage.parentId
     const activeBranchId = activeSession.activeBranchId
     if (!activeBranchId) {
       return
     }
 
     if (!isLeafAssistantGroup(activeSession, messageId)) {
-      const activePathMessageId = getActivePathAssistantMessageIdForParent(
-        activeSession,
-        targetMessage.parentId
-      )
+      const activePathMessageId = getActivePathAssistantMessageIdForParent(activeSession, parentId)
       setAssistantPreviewSelectionsBySession((current) =>
         setBranchAssistantPreviewSelection(
           current,
           activeSessionId,
           activeBranchId,
-          targetMessage.parentId!,
+          parentId,
           activePathMessageId === messageId ? null : messageId
         )
       )
@@ -962,13 +955,7 @@ export function useChatSession(enabled = true): UseChatSessionResult {
     const updated = normalizeChatSession(payload)
     setSessions((current) => upsertSessions(current, updated))
     setAssistantPreviewSelectionsBySession((current) =>
-      setBranchAssistantPreviewSelection(
-        current,
-        activeSessionId,
-        activeBranchId,
-        targetMessage.parentId!,
-        null
-      )
+      setBranchAssistantPreviewSelection(current, activeSessionId, activeBranchId, parentId, null)
     )
   }
 
@@ -1014,7 +1001,9 @@ export function useChatSession(enabled = true): UseChatSessionResult {
 
     setSessions((current) =>
       current.map((session) =>
-        session.id === activeSessionId ? appendOptimisticMessages(session, config, userMessage, assistantPlaceholder, startedAt) : session
+        session.id === activeSessionId
+          ? appendOptimisticMessages(session, config, userMessage, assistantPlaceholder, startedAt)
+          : session
       )
     )
 
@@ -1027,15 +1016,23 @@ export function useChatSession(enabled = true): UseChatSessionResult {
         tempUserMessageId: userMessage.id,
         request: ({ onEvent, signal }) =>
           modifiedNodes.length > 0
-            ? streamConversationMessageWithEdits(activeSessionId, {
-                content: normalizedContent,
-                draftConfig: config,
-                modifiedNodes
-              }, { onEvent, signal })
-            : streamConversationMessage(activeSessionId, {
-                content: normalizedContent,
-                draftConfig: config
-              }, { onEvent, signal })
+            ? streamConversationMessageWithEdits(
+                activeSessionId,
+                {
+                  content: normalizedContent,
+                  draftConfig: config,
+                  modifiedNodes
+                },
+                { onEvent, signal }
+              )
+            : streamConversationMessage(
+                activeSessionId,
+                {
+                  content: normalizedContent,
+                  draftConfig: config
+                },
+                { onEvent, signal }
+              )
       })
       const updated = streamedSession ?? (await loadConversationDetail(activeSessionId))
       if (modifiedNodes.length > 0) {
@@ -1115,16 +1112,15 @@ function appendOptimisticMessages(
     ...assistantPlaceholder,
     parentId: userNode.id
   }
-  const nextBranches = (
-    session.branches.length > 0 ? session.branches : [activeBranch]
-  ).map((branch) =>
-    branch.id === activeBranch.id
-      ? {
-          ...branch,
-          baseMessageId: branch.baseMessageId ?? userNode.id,
-          headMessageId: assistantPlaceholder.id
-        }
-      : branch
+  const nextBranches = (session.branches.length > 0 ? session.branches : [activeBranch]).map(
+    (branch) =>
+      branch.id === activeBranch.id
+        ? {
+            ...branch,
+            baseMessageId: branch.baseMessageId ?? userNode.id,
+            headMessageId: assistantPlaceholder.id
+          }
+        : branch
   )
   const nextMessageNodes = {
     ...session.messageNodes,
@@ -1265,10 +1261,7 @@ function applyStreamCreated(
       loading: true
     }
     if (session.messagesSource === 'server') {
-      nextMessages = [
-        ...session.messages,
-        nextMessageNodes[event.assistantMessageId]
-      ]
+      nextMessages = [...session.messages, nextMessageNodes[event.assistantMessageId]]
     }
   }
 
@@ -1307,11 +1300,7 @@ function applyStreamCreated(
   })
 }
 
-function applyStreamDelta(
-  session: ChatSession,
-  assistantMessageId: string,
-  content: string
-) {
+function applyStreamDelta(session: ChatSession, assistantMessageId: string, content: string) {
   const assistantMessage = session.messageNodes[assistantMessageId]
   if (!assistantMessage) {
     return session

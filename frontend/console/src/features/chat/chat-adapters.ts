@@ -206,12 +206,9 @@ export function normalizeChatMessage(payload: unknown): ChatMessage {
     content,
     status,
     timestamp: toNumber(readValue(row, ['timestamp'], Date.now())),
-    parentId:
-      String(readValue(row, ['parentId', 'parent_id'], '')) || null,
-    sourceNodeId:
-      String(readValue(row, ['sourceNodeId', 'source_node_id'], '')) || null,
-    modifiedFrom:
-      String(readValue(row, ['modifiedFrom', 'modified_from'], '')) || null,
+    parentId: String(readValue(row, ['parentId', 'parent_id'], '')) || null,
+    sourceNodeId: String(readValue(row, ['sourceNodeId', 'source_node_id'], '')) || null,
+    modifiedFrom: String(readValue(row, ['modifiedFrom', 'modified_from'], '')) || null,
     pinned: Boolean(readValue(row, ['pinned'], false)),
     archived: Boolean(readValue(row, ['archived'], false)),
     stale: Boolean(readValue(row, ['stale'], false)),
@@ -256,7 +253,9 @@ export function normalizeChatStreamEvent(payload: unknown): ChatStreamEvent | nu
         cacheHit: Boolean(readValue(meta, ['cacheHit', 'cache_hit'], false)),
         endpointId: String(readValue(meta, ['endpointId', 'endpoint_id'], '')),
         fallbackCount: toNumber(readValue(meta, ['fallbackCount', 'fallback_count'], 0)),
-        strategy: String(readValue(meta, ['strategy'], defaultChatConfig.strategy)) as ChatConfig['strategy']
+        strategy: String(
+          readValue(meta, ['strategy'], defaultChatConfig.strategy)
+        ) as ChatConfig['strategy']
       }
     }
   }
@@ -289,10 +288,11 @@ function normalizeVisibleChatMessage(
   const row = isRecord(payload) ? payload : {}
   const virtualId = String(readValue(row, ['virtualId', 'virtual_id', 'id'], crypto.randomUUID()))
   const kind = String(readValue(row, ['kind'], 'node')) as ChatMessage['kind']
-  const sourceNodeId =
-    String(readValue(row, ['sourceNodeId', 'source_node_id'], '')) || null
-  const rawSourceNodeIds = row['source_node_ids'] ?? row['sourceNodeIds']
-  const archivedNodeIds = Array.isArray(rawSourceNodeIds) ? (rawSourceNodeIds as string[]) : undefined
+  const sourceNodeId = String(readValue(row, ['sourceNodeId', 'source_node_id'], '')) || null
+  const rawSourceNodeIds = row.source_node_ids ?? row.sourceNodeIds
+  const archivedNodeIds = Array.isArray(rawSourceNodeIds)
+    ? (rawSourceNodeIds as string[])
+    : undefined
 
   if (kind === 'node' && sourceNodeId && messageNodes[sourceNodeId]) {
     const node = messageNodes[sourceNodeId]
@@ -431,8 +431,13 @@ export function resolveChatSessionGraph(
 ): ChatSession {
   const messages =
     input.messagesSource === 'server'
-      ? input.messages ?? []
-      : flattenChatBranchMessages(input.messageNodes, input.branches, input.activeBranchId, input.messages ?? [])
+      ? (input.messages ?? [])
+      : flattenChatBranchMessages(
+          input.messageNodes,
+          input.branches,
+          input.activeBranchId,
+          input.messages ?? []
+        )
   const activeBranch = getActiveChatBranch(input.branches, input.activeBranchId)
 
   return {
@@ -457,7 +462,9 @@ export function normalizeChatSession(payload: unknown): ChatSession {
             ? (readValue(row, ['messages'], []) as unknown[]).map(normalizeChatMessage)
             : []
         )
-  const hasVisibleMessages = Array.isArray(readValue(row, ['visibleMessages', 'visible_messages'], null))
+  const hasVisibleMessages = Array.isArray(
+    readValue(row, ['visibleMessages', 'visible_messages'], null)
+  )
   const visibleMessages = hasVisibleMessages
     ? (readValue(row, ['visibleMessages', 'visible_messages'], []) as unknown[]).map((item) =>
         normalizeVisibleChatMessage(item, messageNodes)
@@ -466,8 +473,7 @@ export function normalizeChatSession(payload: unknown): ChatSession {
   const fallbackMessages = Array.isArray(readValue(row, ['messages'], []))
     ? (readValue(row, ['messages'], []) as unknown[]).map(normalizeChatMessage)
     : []
-  const activeBranchId =
-    String(readValue(row, ['activeBranchId', 'active_branch_id'], '')) || null
+  const activeBranchId = String(readValue(row, ['activeBranchId', 'active_branch_id'], '')) || null
 
   return resolveChatSessionGraph({
     id: String(readValue(row, ['id'], crypto.randomUUID())),
@@ -517,14 +523,12 @@ type BuildTreeViewInput = {
 function truncatePreview(text: string, max: number): string {
   if (!text) return ''
   if (text.length <= max) return text
-  return text.slice(0, max).trimEnd() + '…'
+  return `${text.slice(0, max).trimEnd()}…`
 }
 
 export function buildTreeView(input: BuildTreeViewInput): TreeNode[] {
   const { messageNodes, visibleMessages, activeBranchHeadId } = input
-  const messageNodesArray = Array.isArray(messageNodes)
-    ? messageNodes
-    : Object.values(messageNodes)
+  const messageNodesArray = Array.isArray(messageNodes) ? messageNodes : Object.values(messageNodes)
   const byId = new Map(messageNodesArray.map((node) => [node.id, node]))
 
   // 1. Walk current branch path from head to root, collecting all node ids
@@ -594,9 +598,7 @@ export function buildTreeView(input: BuildTreeViewInput): TreeNode[] {
       }
     }
 
-    const anchorIndex = anchorNodeId
-      ? result.findIndex((entry) => entry.id === anchorNodeId)
-      : -1
+    const anchorIndex = anchorNodeId ? result.findIndex((entry) => entry.id === anchorNodeId) : -1
     const insertAt = anchorIndex >= 0 ? anchorIndex : result.length
 
     result.splice(insertAt, 0, {

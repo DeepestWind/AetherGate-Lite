@@ -3,8 +3,8 @@ import type { ChatConfig } from '@/features/chat/chat-types'
 import { useChatSession } from '@/features/chat/hooks/use-chat-session'
 import {
   activateConversationBranch,
-  createConversationBranch,
   createChatConversation,
+  createConversationBranch,
   deleteChatConversation,
   editConversationMessageInBranch,
   getChatConversation,
@@ -19,8 +19,8 @@ import {
   streamConversationMessageWithEdits,
   streamEditConversationMessageInBranch,
   streamRegenerateConversationMessage,
-  updateConversationMessagePin,
-  updateChatConversationConfig
+  updateChatConversationConfig,
+  updateConversationMessagePin
 } from '@/shared/api/modules/chat'
 
 vi.mock('@/shared/api/modules/chat', () => ({
@@ -425,7 +425,11 @@ describe('useChatSession', () => {
     )
     vi.mocked(streamEditConversationMessageInBranch).mockImplementation(
       async (conversationId, messageId, payload, options) => {
-        const conversation = await editConversationMessageInBranch(conversationId, messageId, payload)
+        const conversation = await editConversationMessageInBranch(
+          conversationId,
+          messageId,
+          payload
+        )
         options.onEvent({
           kind: 'message.completed',
           conversation
@@ -1284,16 +1288,20 @@ describe('useChatSession', () => {
       await result.current.sendChat('继续', draftConfig)
     })
 
-    expect(streamConversationMessageWithEdits).toHaveBeenCalledWith('conv_1', {
-      content: '继续',
-      draftConfig,
-      modifiedNodes: [
-        {
-          id: 'msg_1',
-          content: '改写后的第一条消息'
-        }
-      ]
-    }, expect.any(Object))
+    expect(streamConversationMessageWithEdits).toHaveBeenCalledWith(
+      'conv_1',
+      {
+        content: '继续',
+        draftConfig,
+        modifiedNodes: [
+          {
+            id: 'msg_1',
+            content: '改写后的第一条消息'
+          }
+        ]
+      },
+      expect.any(Object)
+    )
     expect(result.current.pendingEditCount).toBe(0)
     expect(result.current.messages[0]?.content).toBe('改写后的第一条消息')
     expect(result.current.messages[0]?.pendingEdit).toBeFalsy()
@@ -1561,10 +1569,15 @@ describe('useChatSession', () => {
     })
 
     expect(mode).toBe('branch_user')
-    expect(streamEditConversationMessageInBranch).toHaveBeenCalledWith('conv_1', 'msg_1', {
-      content: '改写后的第一条消息',
-      draftConfig
-    }, expect.any(Object))
+    expect(streamEditConversationMessageInBranch).toHaveBeenCalledWith(
+      'conv_1',
+      'msg_1',
+      {
+        content: '改写后的第一条消息',
+        draftConfig
+      },
+      expect.any(Object)
+    )
     expect(result.current.activeSession?.activeBranchId).toBe('branch_side')
     expect(result.current.messages.map((message) => message.id)).toEqual(['msg_5', 'msg_6'])
   })
@@ -1663,15 +1676,20 @@ describe('useChatSession', () => {
       await result.current.regenerateAssistantMessage('msg_2', draftConfig)
     })
 
-    expect(streamRegenerateConversationMessage).toHaveBeenCalledWith('conv_1', 'msg_2', {
-      draftConfig,
-      modifiedNodes: [
-        {
-          id: 'msg_1',
-          content: '改写后的第一条消息'
-        }
-      ]
-    }, expect.any(Object))
+    expect(streamRegenerateConversationMessage).toHaveBeenCalledWith(
+      'conv_1',
+      'msg_2',
+      {
+        draftConfig,
+        modifiedNodes: [
+          {
+            id: 'msg_1',
+            content: '改写后的第一条消息'
+          }
+        ]
+      },
+      expect.any(Object)
+    )
     expect(result.current.pendingEditCount).toBe(0)
     expect(result.current.messages.map((message) => message.id)).toEqual(['msg_1', 'msg_3'])
     expect(result.current.messages[1]?.content).toBe('重试后的回复')
@@ -2201,10 +2219,15 @@ describe('useChatSession', () => {
       await result.current.regenerateAssistantMessage('msg_2', draftConfig)
     })
 
-    expect(streamRegenerateConversationMessage).toHaveBeenCalledWith('conv_1', 'msg_2', {
-      draftConfig,
-      modifiedNodes: []
-    }, expect.any(Object))
+    expect(streamRegenerateConversationMessage).toHaveBeenCalledWith(
+      'conv_1',
+      'msg_2',
+      {
+        draftConfig,
+        modifiedNodes: []
+      },
+      expect.any(Object)
+    )
     expect(result.current.activeSession?.activeBranch?.headMessageId).toBe('msg_4')
     expect(result.current.messages.map((message) => message.id)).toEqual([
       'msg_1',

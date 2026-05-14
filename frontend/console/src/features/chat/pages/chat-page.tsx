@@ -1,13 +1,13 @@
 import { GitBranch, Settings2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { buildTreeView } from '@/features/chat/chat-adapters'
 import type { ChatMessage, TreeNode } from '@/features/chat/chat-types'
 import { defaultChatConfig } from '@/features/chat/chat-types'
-import { buildTreeView } from '@/features/chat/chat-adapters'
 import { AdvancedSettingsDrawer } from '@/features/chat/components/advanced-settings-drawer'
-import { ChatEmptyState } from '@/features/chat/components/empty-state'
 import { CollapseRail } from '@/features/chat/components/collapse-rail'
 import { ControlPanel } from '@/features/chat/components/control-panel'
+import { ChatEmptyState } from '@/features/chat/components/empty-state'
 import { InputArea } from '@/features/chat/components/input-area'
 import { MarginaliaPanel } from '@/features/chat/components/marginalia-panel'
 import { MessageList } from '@/features/chat/components/message-list'
@@ -140,7 +140,11 @@ export function ChatPage() {
         visibleMessages: session.messages,
         activeBranchHeadId: session.activeSession?.activeBranch?.headMessageId ?? null
       }),
-    [session.activeSession?.messageNodes, session.messages, session.activeSession?.activeBranch?.headMessageId]
+    [
+      session.activeSession?.messageNodes,
+      session.messages,
+      session.activeSession?.activeBranch?.headMessageId
+    ]
   )
 
   const pinnedMessages = useMemo(() => {
@@ -149,8 +153,14 @@ export function ChatPage() {
   }, [session.activeSession?.messageNodes])
 
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  const messageCount = session.messages.length
 
   useEffect(() => {
+    if (messageCount === 0) {
+      setFocusedId(null)
+      return
+    }
+
     const root = document.querySelector('[data-chat-message-list]')
     if (!root) return
     const elements = Array.from(root.querySelectorAll('[data-message-id]'))
@@ -170,7 +180,7 @@ export function ChatPage() {
     )
     for (const element of elements) observer.observe(element)
     return () => observer.disconnect()
-  }, [session.messages.length])
+  }, [messageCount])
 
   function handleNodeClick(node: TreeNode) {
     if (node.kind === 'summary') return

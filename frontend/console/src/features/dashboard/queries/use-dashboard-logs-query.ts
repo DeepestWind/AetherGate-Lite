@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { normalizeDashboardLogsPage } from '@/features/dashboard/dashboard-adapters'
 import { dashboardQueryKeys } from '@/features/dashboard/dashboard-query-keys'
-import { useApiAccessState } from '@/shared/auth/use-api-access'
 import type { LogsParams } from '@/shared/api/modules/internal'
 import { getLogs } from '@/shared/api/modules/internal'
+import { useApiAccessState } from '@/shared/auth/use-api-access'
 
 export function useDashboardLogsQuery(params: LogsParams) {
   const { canRequestApi } = useApiAccessState()

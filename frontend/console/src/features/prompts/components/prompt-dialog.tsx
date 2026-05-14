@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useMemo } from 'react'
 import { type Resolver, useForm } from 'react-hook-form'
-import { toPromptFormValues } from '@/features/prompts/prompt-adapters'
 import { promptFormSchema } from '@/features/prompts/forms/prompt-form-schema'
+import { toPromptFormValues } from '@/features/prompts/prompt-adapters'
 import type { PromptFormValues, PromptTemplateRecord } from '@/features/prompts/prompt-types'
 import { Button } from '@/shared/ui/button'
 import {
@@ -151,4 +151,3 @@ export function PromptDialog({
     </Dialog>
   )
 }
-

@@ -19,4 +19,3 @@ export type PromptFormValues = {
   promptId: string
   variablesText: string
 }
-

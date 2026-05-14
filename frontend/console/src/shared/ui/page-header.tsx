@@ -18,9 +18,7 @@ export function PageHeader({ title, meta, actions, className }: PageHeaderProps)
     >
       <div className="min-w-0">
         <h1 className="font-serif text-xl text-ink truncate">{title}</h1>
-        {meta ? (
-          <p className="font-serif italic text-xs text-ink-faint mt-1">{meta}</p>
-        ) : null}
+        {meta ? <p className="font-serif italic text-xs text-ink-faint mt-1">{meta}</p> : null}
       </div>
       {actions ? <div className="flex items-center gap-2 shrink-0">{actions}</div> : null}
     </div>

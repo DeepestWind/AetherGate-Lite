@@ -3,13 +3,7 @@ import { cn } from '@/shared/lib/cn'
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <section
-      className={cn(
-        'bg-paper-warm border border-rule rounded-lg',
-        className
-      )}
-      {...props}
-    />
+    <section className={cn('bg-paper-warm border border-rule rounded-lg', className)} {...props} />
   )
 }
 

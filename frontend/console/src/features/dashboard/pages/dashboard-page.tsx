@@ -9,8 +9,8 @@ import { useDashboardLogsQuery } from '@/features/dashboard/queries/use-dashboar
 import { useDashboardMetricsQuery } from '@/features/dashboard/queries/use-dashboard-metrics-query'
 import { useDashboardStatsQuery } from '@/features/dashboard/queries/use-dashboard-stats-query'
 import { useApiAccessState } from '@/shared/auth/use-api-access'
-import { Button } from '@/shared/ui/button'
 import { AuthRequiredState } from '@/shared/ui/auth-required-state'
+import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -19,17 +19,6 @@ export function DashboardPage() {
   const metricsQuery = useDashboardMetricsQuery()
   const statsQuery = useDashboardStatsQuery(7)
   const logsQuery = useDashboardLogsQuery({ page: 0, size: 10 })
-
-  if (!hasHydrated) {
-    return <div className="h-[420px] animate-pulse rounded-[20px] bg-secondary" />
-  }
-
-  if (!hasToken) {
-    return (
-      <AuthRequiredState description="概览页依赖 /internal/metrics、/internal/stats 和 /internal/logs，请先配置 Bearer Token。" />
-    )
-  }
-
   const hasBlockingError = metricsQuery.isError && statsQuery.isError && logsQuery.isError
 
   const lastUpdatedLabel = useMemo(() => {
@@ -44,6 +33,16 @@ export function DashboardPage() {
 
   const handleRefresh = async () => {
     await Promise.all([metricsQuery.refetch(), statsQuery.refetch(), logsQuery.refetch()])
+  }
+
+  if (!hasHydrated) {
+    return <div className="h-[420px] animate-pulse rounded-[20px] bg-secondary" />
+  }
+
+  if (!hasToken) {
+    return (
+      <AuthRequiredState description="概览页依赖 /internal/metrics、/internal/stats 和 /internal/logs，请先配置 Bearer Token。" />
+    )
   }
 
   return (

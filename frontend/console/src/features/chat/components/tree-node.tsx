@@ -9,7 +9,13 @@ type TreeNodeViewProps = {
   onMouseLeave: () => void
 }
 
-export function TreeNodeView({ node, isFocused, onClick, onMouseEnter, onMouseLeave }: TreeNodeViewProps) {
+export function TreeNodeView({
+  node,
+  isFocused,
+  onClick,
+  onMouseEnter,
+  onMouseLeave
+}: TreeNodeViewProps) {
   const dotColor = node.kind === 'summary' ? 'bg-moss' : 'bg-sand'
   return (
     <button
@@ -32,9 +38,7 @@ export function TreeNodeView({ node, isFocused, onClick, onMouseEnter, onMouseLe
         className={cn(
           'absolute size-1.5 rounded-full top-[14px]',
           dotColor,
-          node.state === 'current'
-            ? 'opacity-100 ring-2 ring-sand/20'
-            : 'opacity-50'
+          node.state === 'current' ? 'opacity-100 ring-2 ring-sand/20' : 'opacity-50'
         )}
         style={{ left: 8 + node.depth * 10 - 2 }}
         aria-hidden

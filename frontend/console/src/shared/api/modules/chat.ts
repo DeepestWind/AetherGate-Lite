@@ -222,16 +222,20 @@ export async function streamConversationMessage(
   payload: { content: string; draftConfig: ChatConversationConfigPayload },
   options: StreamOptions
 ) {
-  return streamChatRequest(`/api/chat/conversations/${conversationId}/messages/stream`, {
-    content: payload.content,
-    draft_config: {
-      model: payload.draftConfig.model,
-      prompt_id: payload.draftConfig.promptId,
-      strategy: payload.draftConfig.strategy,
-      temperature: payload.draftConfig.temperature,
-      variables: payload.draftConfig.variables
-    }
-  }, options)
+  return streamChatRequest(
+    `/api/chat/conversations/${conversationId}/messages/stream`,
+    {
+      content: payload.content,
+      draft_config: {
+        model: payload.draftConfig.model,
+        prompt_id: payload.draftConfig.promptId,
+        strategy: payload.draftConfig.strategy,
+        temperature: payload.draftConfig.temperature,
+        variables: payload.draftConfig.variables
+      }
+    },
+    options
+  )
 }
 
 export async function sendConversationMessageWithEdits(
@@ -271,20 +275,24 @@ export async function streamConversationMessageWithEdits(
   },
   options: StreamOptions
 ) {
-  return streamChatRequest(`/api/chat/conversations/${conversationId}/messages/commit/stream`, {
-    content: payload.content,
-    draft_config: {
-      model: payload.draftConfig.model,
-      prompt_id: payload.draftConfig.promptId,
-      strategy: payload.draftConfig.strategy,
-      temperature: payload.draftConfig.temperature,
-      variables: payload.draftConfig.variables
+  return streamChatRequest(
+    `/api/chat/conversations/${conversationId}/messages/commit/stream`,
+    {
+      content: payload.content,
+      draft_config: {
+        model: payload.draftConfig.model,
+        prompt_id: payload.draftConfig.promptId,
+        strategy: payload.draftConfig.strategy,
+        temperature: payload.draftConfig.temperature,
+        variables: payload.draftConfig.variables
+      },
+      modified_nodes: payload.modifiedNodes.map((item) => ({
+        id: item.id,
+        content: item.content
+      }))
     },
-    modified_nodes: payload.modifiedNodes.map((item) => ({
-      id: item.id,
-      content: item.content
-    }))
-  }, options)
+    options
+  )
 }
 
 export async function editConversationMessageInBranch(

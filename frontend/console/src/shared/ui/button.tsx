@@ -8,16 +8,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default:
-          'border-sand bg-sand text-white hover:border-sand-hover hover:bg-sand-hover',
-        danger:
-          'border-terracotta bg-terracotta text-white hover:opacity-90',
-        secondary:
-          'border-rule bg-paper text-ink hover:border-sand hover:text-sand',
+        default: 'border-sand bg-sand text-white hover:border-sand-hover hover:bg-sand-hover',
+        danger: 'border-terracotta bg-terracotta text-white hover:opacity-90',
+        secondary: 'border-rule bg-paper text-ink hover:border-sand hover:text-sand',
         ghost:
           'border-transparent bg-transparent text-ink-soft hover:bg-paper-shade hover:text-ink',
-        outline:
-          'border-rule bg-transparent text-ink hover:bg-paper-shade'
+        outline: 'border-rule bg-transparent text-ink hover:bg-paper-shade'
       },
       size: {
         default: 'h-10 px-4 py-2',

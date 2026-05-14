@@ -158,10 +158,7 @@ export function MessageBubble({
   }
 
   return (
-    <div
-      data-message-id={message.id}
-      className={cn('group mb-[18px]', stale && 'opacity-70')}
-    >
+    <div data-message-id={message.id} className={cn('group mb-[18px]', stale && 'opacity-70')}>
       {/* Role label row */}
       <div className="font-serif italic text-xs text-ink-soft mb-1 flex items-center gap-2 px-1">
         <span>
@@ -173,12 +170,17 @@ export function MessageBubble({
         </span>
         <span className="not-italic font-sans">{dayjs(timestamp).format('HH:mm')}</span>
         {pinned ? (
-          <span className="not-italic font-sans inline-flex items-center gap-1 text-sand" title="已标记">
+          <span
+            className="not-italic font-sans inline-flex items-center gap-1 text-sand"
+            title="已标记"
+          >
             <Pin className="size-3" />
             已标记
           </span>
         ) : null}
-        {message.pendingEdit ? <span className="not-italic font-sans text-terracotta">未提交修改</span> : null}
+        {message.pendingEdit ? (
+          <span className="not-italic font-sans text-terracotta">未提交修改</span>
+        ) : null}
         {modifiedFrom ? <span className="not-italic font-sans text-terracotta">已改写</span> : null}
         {archived ? <span className="not-italic font-sans text-ink-faint">已归档</span> : null}
         {!isUser && callInfo?.cacheHit ? (
@@ -192,7 +194,9 @@ export function MessageBubble({
       {/* Content area */}
       {editing ? (
         <div className="mb-2">
-          <div className="font-serif italic text-xs text-ink-faint mb-1 px-1">{roleLabel(message)} · 编辑中</div>
+          <div className="font-serif italic text-xs text-ink-faint mb-1 px-1">
+            {roleLabel(message)} · 编辑中
+          </div>
           <div className="space-y-3 rounded-[18px] border border-rule bg-paper-warm px-3 py-3">
             <Textarea
               value={draftContent}
@@ -439,10 +443,7 @@ export function MessageBubble({
               ['总 Tokens', String(callInfo.totalTokens)],
               ['Fallback', String(callInfo.fallbackCount)]
             ].map(([label, value]) => (
-              <div
-                key={label}
-                className="rounded-2xl border border-rule bg-paper px-3 py-3"
-              >
+              <div key={label} className="rounded-2xl border border-rule bg-paper px-3 py-3">
                 <div>{label}</div>
                 <div className="mt-1 break-all font-mono text-ink">{value}</div>
               </div>

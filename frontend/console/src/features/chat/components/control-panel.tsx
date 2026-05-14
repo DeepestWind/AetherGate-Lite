@@ -1,3 +1,4 @@
+import { ChevronRight } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
 import type {
   ChatCallInfo,
@@ -6,12 +7,11 @@ import type {
   PromptTemplate
 } from '@/features/chat/chat-types'
 import { cn } from '@/shared/lib/cn'
+import { useConsoleUiStore } from '@/shared/stores/use-console-ui-store'
 import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 import { Select } from '@/shared/ui/select'
 import { Separator } from '@/shared/ui/separator'
-import { ChevronRight } from 'lucide-react'
-import { useConsoleUiStore } from '@/shared/stores/use-console-ui-store'
 import { CallInfoPanel } from './call-info-panel'
 
 type ControlPanelProps = {
@@ -74,7 +74,10 @@ export function ControlPanel({
       >
         <div className="flex items-baseline gap-2 min-w-0">
           <ChevronRight
-            className={cn('size-3 text-ink-faint shrink-0 transition-transform', isOpen && 'rotate-90')}
+            className={cn(
+              'size-3 text-ink-faint shrink-0 transition-transform',
+              isOpen && 'rotate-90'
+            )}
           />
           <span className="font-serif italic text-xs text-ink-soft">模型设置</span>
         </div>
@@ -87,9 +90,9 @@ export function ControlPanel({
         <div className="px-4 pb-4 pt-1 border-t border-dashed border-rule space-y-3">
           {/* Strategy */}
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-ink-faint mb-1">
+            <div className="mb-1 block text-[10px] uppercase tracking-wider text-ink-faint">
               路由策略
-            </label>
+            </div>
             <div className="grid gap-2">
               {strategies.map((strategy) => (
                 <button
@@ -112,7 +115,10 @@ export function ControlPanel({
           {/* Model */}
           <div>
             <div className="flex items-center justify-between gap-3 mb-1">
-              <label className="block text-[10px] uppercase tracking-wider text-ink-faint">
+              <label
+                htmlFor="chat-model-select"
+                className="block text-[10px] uppercase tracking-wider text-ink-faint"
+              >
                 逻辑模型
               </label>
               {config.model ? (
@@ -122,6 +128,7 @@ export function ControlPanel({
               ) : null}
             </div>
             <Select
+              id="chat-model-select"
               value={config.model}
               onChange={(event) => onChange('model', event.target.value)}
             >
@@ -140,7 +147,10 @@ export function ControlPanel({
           {/* Temperature */}
           <div>
             <div className="flex items-center justify-between gap-3 mb-1">
-              <label className="block text-[10px] uppercase tracking-wider text-ink-faint">
+              <label
+                htmlFor="chat-temperature"
+                className="block text-[10px] uppercase tracking-wider text-ink-faint"
+              >
                 Temperature
               </label>
               <span className="font-mono text-xs text-ink-faint">
@@ -148,6 +158,7 @@ export function ControlPanel({
               </span>
             </div>
             <input
+              id="chat-temperature"
               className="w-full accent-[var(--accent)]"
               type="range"
               min={0}
@@ -162,7 +173,10 @@ export function ControlPanel({
           {/* Prompt template */}
           <div>
             <div className="flex items-center justify-between gap-3 mb-1">
-              <label className="block text-[10px] uppercase tracking-wider text-ink-faint">
+              <label
+                htmlFor="chat-prompt-template"
+                className="block text-[10px] uppercase tracking-wider text-ink-faint"
+              >
                 Prompt 模板
               </label>
               {config.promptId ? (
@@ -179,6 +193,7 @@ export function ControlPanel({
               ) : null}
             </div>
             <Select
+              id="chat-prompt-template"
               value={config.promptId}
               onChange={(event) => onChange('promptId', event.target.value)}
             >
@@ -225,9 +240,9 @@ export function ControlPanel({
           {/* Call info */}
           <Separator />
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-ink-faint mb-2">
+            <div className="mb-2 block text-[10px] uppercase tracking-wider text-ink-faint">
               最近一次调用
-            </label>
+            </div>
             <CallInfoPanel callInfo={callInfo} showTitle={false} />
           </div>
         </div>

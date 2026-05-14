@@ -1,6 +1,6 @@
-import rehypeHighlight from 'rehype-highlight'
-import { useEffect, useState, type ComponentProps } from 'react'
+import { type ComponentProps, useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
 
 async function copyText(content: string) {

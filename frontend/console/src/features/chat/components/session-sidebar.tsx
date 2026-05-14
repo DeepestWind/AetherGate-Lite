@@ -1,12 +1,4 @@
-import {
-  Check,
-  ChevronLeft,
-  MessageSquarePlus,
-  PencilLine,
-  Search,
-  Trash2,
-  X
-} from 'lucide-react'
+import { Check, ChevronLeft, MessageSquarePlus, PencilLine, Search, Trash2, X } from 'lucide-react'
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import {
   filterChatSessions,

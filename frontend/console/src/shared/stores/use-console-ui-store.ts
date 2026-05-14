@@ -33,6 +33,7 @@ export const useConsoleUiStore = create<ConsoleUiState>((set) => ({
   setChatRightCollapsed: (collapsed) => set({ chatRightCollapsed: collapsed }),
 
   chatControlPanelOpen: false,
-  toggleChatControlPanel: () => set((state) => ({ chatControlPanelOpen: !state.chatControlPanelOpen })),
+  toggleChatControlPanel: () =>
+    set((state) => ({ chatControlPanelOpen: !state.chatControlPanelOpen })),
   setChatControlPanelOpen: (open) => set({ chatControlPanelOpen: open })
 }))

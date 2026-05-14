@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { defaultChatConfig, type ChatConfig } from '@/features/chat/chat-types'
+import { type ChatConfig, defaultChatConfig } from '@/features/chat/chat-types'
 
 type ChatUiState = {
   config: ChatConfig

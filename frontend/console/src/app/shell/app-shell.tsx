@@ -1,9 +1,4 @@
-import {
-  PanelLeftOpen,
-  Settings,
-  Shield,
-  X
-} from 'lucide-react'
+import { PanelLeftOpen, Settings, Shield, X } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { useApiAccessState } from '@/shared/auth/use-api-access'
@@ -80,9 +75,7 @@ export function AppShell() {
       <header className="hidden lg:flex h-14 bg-paper-warm border-b border-rule px-6 items-center justify-between sticky top-0 z-40">
         <div className="flex items-baseline gap-3">
           <span className="font-serif text-base text-ink">Branchat</span>
-          <span className="font-serif italic text-xs text-ink-soft">
-            · 一个会分叉的对话
-          </span>
+          <span className="font-serif italic text-xs text-ink-soft">· 一个会分叉的对话</span>
         </div>
 
         <nav aria-label="主导航" className="flex items-center gap-6 text-sm">

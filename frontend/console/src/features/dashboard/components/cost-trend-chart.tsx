@@ -22,11 +22,11 @@ type AxisTooltipRow = {
 }
 
 const NOTEBOOK_PALETTE = {
-  primary: '#94785a',   // sand
+  primary: '#94785a', // sand
   secondary: '#7d9477', // moss
-  tertiary: '#6b5d44',  // ink-soft
-  grid: '#e8dfce',      // rule
-  text: '#6b5d44'       // ink-soft
+  tertiary: '#6b5d44', // ink-soft
+  grid: '#e8dfce', // rule
+  text: '#6b5d44' // ink-soft
 }
 
 function buildOption(data: DashboardStatPoint[]): EChartsOption {
